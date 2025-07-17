@@ -59,7 +59,7 @@ Follow these steps to get the project up and running:
 
     Execute the following command in your terminal to build the necessary Docker images and start the project in detached mode:
 
-    ```bash
+    ```
     docker-compose up --build -d
     ```
 
@@ -75,7 +75,7 @@ Follow these steps to get the project up and running:
 
     If Airflow does not start automatically, you can restart its webserver with the following command:
 
-    ```bash
+    ```
     docker-compose restart webserver
     ```
 
@@ -83,7 +83,7 @@ Follow these steps to get the project up and running:
 
     To stop all running services and remove the Docker volumes, execute:
 
-    ```bash
+    ```
     docker-compose down -v
     ```
 
