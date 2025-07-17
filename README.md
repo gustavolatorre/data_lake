@@ -50,7 +50,6 @@ Follow these steps to get the project up and running:
     AIRFLOW_USER=airflow
     AIRFLOW_PASSWORD=airflow
     AIRFLOW_EMAIL=your-email@gmail.com
-
     MINIO_ROOT_USER=admin
     MINIO_ROOT_PASSWORD=password
     MINIO_ENDPOINT=minio:9000
