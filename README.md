@@ -89,8 +89,11 @@ The project is orchestrated with **Apache Airflow** and uses **Docker Compose** 
 
 - **Apache Airflow**:
   - Orchestration of pipelines with the DAG `breweries_pipeline.py`
+
   - Scheduler, Webserver, and Executor configured
+
   - `spark_docker` connection to submit Spark jobs
+  
   - Custom `Dockerfile.airflow` with:
     - `openjdk-17-jdk`
     - `minio`, `pyspark==3.5.2`, `apache-airflow-providers-apache-spark`
