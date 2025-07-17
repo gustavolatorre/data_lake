@@ -17,7 +17,7 @@ Follow these steps to get the project up and running:
 1.  **Clone the Repository:**
 
     ```bash
-    git clone [https://github.com/gustavolatorre/data_lake.git](https://github.com/gustavolatorre/data_lake.git)
+    git clone https://github.com/gustavolatorre/data_lake.git
     ```
 
 2.  **Navigate to the Project Root:**
