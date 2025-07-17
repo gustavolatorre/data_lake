@@ -16,13 +16,13 @@ Follow these steps to get the project up and running:
 
 1.  **Clone the Repository:**
 
-    ```bash
+    ```
     git clone https://github.com/gustavolatorre/data_lake.git
     ```
 
 2.  **Navigate to the Project Root:**
 
-    ```bash
+    ```
     cd <your-project-folder>
     ```
 
@@ -30,7 +30,7 @@ Follow these steps to get the project up and running:
 
     Execute the following command in your terminal to generate a Fernet key, which is essential for Airflow's security:
 
-    ```bash
+    ```
     docker run --rm apache/airflow:2.11.0-python3.12 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     ```
 
