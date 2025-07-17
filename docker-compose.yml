@@ -1,0 +1,119 @@
+x-spark-common: &spark-common
+  image: bitnami/spark:3.5.2
+  volumes:
+    - ./jobs:/opt/bitnami/spark/jobs
+  env_file:
+    - .env
+  networks:
+    - app-network
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  env_file:
+    - airflow.env
+    - .env
+  volumes:
+    - ./jobs:/opt/airflow/jobs
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+  depends_on:
+    - postgres
+  networks:
+    - app-network
+
+services:
+  spark-master:
+    <<: *spark-common
+    command: bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "9090:8080"
+      - "7077:7077"
+
+  spark-worker:
+      <<: *spark-common
+      command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+      depends_on:
+        - spark-master
+      environment:
+        SPARK_MODE: worker
+        SPARK_WORKER_CORES: 2
+        SPARK_WORKER_MEMORY: 2g
+        SPARK_MASTER_URL: spark://spark-master:7077
+
+  postgres:
+    image: postgres:14.0
+    environment:
+      - POSTGRES_USER=${AIRFLOW_USER}
+      - POSTGRES_PASSWORD=${AIRFLOW_PASSWORD}
+      - POSTGRES_DB=airflow
+    networks:
+      - app-network
+
+  webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      - scheduler
+
+  scheduler:
+    <<: *airflow-common
+    command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_USER} --firstname Joe --lastname Doe --role Admin --email ${AIRFLOW_EMAIL} --password ${AIRFLOW_PASSWORD} && airflow scheduler"
+  
+  minio:
+    image: minio/minio
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_DOMAIN: minio
+    networks:
+      - app-network
+    ports:
+      - 9001:9001
+      - 9000:9000
+    command: [ "server", "/data", "--console-address", ":9001" ]
+    volumes:
+      - ./minio/data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 10s
+
+  minio-setup:
+    image: minio/mc:latest
+    container_name: minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c '
+        echo "Aguardando MinIO ficar pronto...";
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+          echo "MinIO ainda não está pronto, aguardando 2s...";
+          sleep 2;
+        done;
+
+        echo "Conexão com MinIO bem-sucedida. Criando buckets...";
+
+        mc mb --ignore-existing local/bronze &&
+        mc mb --ignore-existing local/silver &&
+        mc mb --ignore-existing local/gold &&
+        echo "Buckets criados com sucesso." &&
+        exit 0;
+      '
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_REGION=us-east-1
+    networks:
+      - app-network
+
+networks:
+  app-network:
