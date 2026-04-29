@@ -1,0 +1,46 @@
+.PHONY: up down restart logs test lint fmt clean help
+
+## —— Docker ——————————————————————————————————————————
+up: ## Start all services
+	docker-compose up --build -d
+
+down: ## Stop all services and remove volumes
+	docker-compose down -v
+
+restart: ## Restart all services
+	docker-compose restart
+
+logs: ## Tail logs for all services
+	docker-compose logs -f
+
+logs-airflow: ## Tail Airflow scheduler logs
+	docker-compose logs -f scheduler
+
+logs-spark: ## Tail Spark master logs
+	docker-compose logs -f spark-master
+
+## —— Quality ————————————————————————————————————————
+test: ## Run tests with coverage
+	pytest --cov=src --cov-report=term-missing tests/
+
+lint: ## Run ruff linter
+	ruff check src/ tests/ dags/
+
+fmt: ## Auto-format code with ruff
+	ruff format src/ tests/ dags/
+	ruff check --fix src/ tests/ dags/
+
+## —— Utilities ——————————————————————————————————————
+clean: ## Remove generated files and caches
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
+	rm -rf .coverage htmlcov/
+
+fernet-key: ## Generate a new Fernet key for Airflow
+	docker run --rm apache/airflow:2.11.0-python3.12 python -c \
+		"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
