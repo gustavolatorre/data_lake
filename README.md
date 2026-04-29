@@ -1,152 +1,125 @@
-# DATA LAKE
+# Professional Data Lakehouse Pipeline
 
-This project uses Docker to provide a streamlined environment for building a data lake and managing data workflows.
+> **v2.0.0** — A professional-grade data engineering pipeline demonstrating modern medallion architecture.
 
----
+This project implements a robust, idempotent data lakehouse using **Apache Airflow**, **PySpark**, **Apache Iceberg**, and **Project Nessie**. It ingests data from the [OpenBreweryDB API](https://www.openbrewerydb.org/), processes it through Bronze, Silver, and Gold layers, and manages it with a Git-like data catalog.
 
-## 📦 Prerequisites
+## 🏗️ Architecture
 
-Before starting, make sure **Docker** is installed on your system.
+```text
+┌──────────────────────────────────────────────────────────────────────┐
+│                        DOCKER COMPOSE NETWORK                        │
+│                                                                      │
+│  ┌─────────────┐    ┌──────────────┐    ┌────────────────────────┐   │
+│  │  Airflow     │    │  Spark       │    │  MinIO (S3)            │   │
+│  │  Scheduler   │───▶│  Master      │───▶│  bronze/ (JSON)        │   │
+│  │  + Webserver │    │  + Worker    │    │  silver/ (Iceberg)     │   │
+│  │  (TaskFlow)  │    │  (Iceberg    │    │  gold/   (Iceberg)     │   │
+│  └──────┬───────┘    │   Runtime)   │    └────────────────────────┘   │
+│         │            └──────┬───────┘              ▲                  │
+│         │                   │                      │                  │
+│  ┌──────┴───────┐    ┌──────┴───────┐    ┌────────┴───────┐         │
+│  │  PostgreSQL   │    │  Nessie      │    │  MinIO Setup   │         │
+│  │  (Airflow DB) │    │  REST Catalog│    │  (bucket init) │         │
+│  └───────────────┘    │  (Iceberg)   │    └────────────────┘         │
+│                       └──────────────┘                               │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
----
+### Data Flow
+1. **Bronze:** API raw ingestion to MinIO (JSON) via Airflow TaskFlow.
+2. **Silver:** Transformation to Iceberg tables, partitioned by `state`, cleaned and validated.
+3. **Gold:** Business-level aggregations (breweries per city/type) stored as Iceberg tables.
 
-## 🚀 How to Run the Project
+## 🛠️ Tech Stack
 
-Follow these steps to get the project running:
+- **Orchestration:** [Apache Airflow 2.11.0](https://airflow.apache.org/) (TaskFlow API)
+- **Processing:** [Apache Spark 3.5.2](https://spark.apache.org/) (PySpark)
+- **Table Format:** [Apache Iceberg 1.5.2](https://iceberg.apache.org/)
+- **Data Catalog:** [Project Nessie 0.79.0](https://projectnessie.org/) (REST API)
+- **Storage:** [MinIO](https://min.io/) (S3-compatible)
+- **Configuration:** [Pydantic Settings v2](https://docs.pydantic.dev/latest/usage/pydantic_settings/)
+- **Quality & Linting:** [Ruff](https://astral.sh/ruff), [Pytest](https://pytest.org/), [Chispa](https://github.com/MrPowers/chispa)
 
-1. **Clone the Repository:**
+## 🚀 Quickstart
 
-   ```bash
-   git clone https://github.com/gustavolatorre/data_lake.git
-   ```
+### 1. Prerequisites
+- Docker & Docker Compose
+- Python 3.12+ (for local development)
+- `make` (optional)
 
-2. **Navigate to the project root:**
+### 2. Setup
+```bash
+# Clone and enter
+git clone <repo-url>
+cd data_lake
 
-   ```bash
-   cd data_lake
-   ```
+# Environment config
+cp .env.example .env
 
-3. **Generate a Fernet Key:**
+# Generate an Airflow Fernet key and add it to .env
+# Copy the output of this command to AIRFLOW__CORE__FERNET_KEY in .env
+make fernet-key
+```
 
-   Run the following command to generate a Fernet key, required for Airflow encryption:
+### 3. Launch Infrastructure
+```bash
+# Start all services in the background
+docker-compose up --build -d
+```
 
-   ```bash
-   docker run --rm apache/airflow:2.11.0-python3.12 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-   ```
+### 4. Access UIs
+- **Airflow:** [http://localhost:8080](http://localhost:8080) (`airflow`/`airflow`)
+- **MinIO:** [http://localhost:9001](http://localhost:9001) (`admin`/`password`)
+- **Nessie:** [http://localhost:19120](http://localhost:19120)
+- **Spark:** [http://localhost:9090](http://localhost:9090)
 
-4. **Add the Fernet Key to `airflow.env`:**
+## 🏗️ Running the Pipeline
 
-   Copy the key generated and paste it into the `airflow.env` file:
+1. **Activate the DAG:** Open the Airflow UI, find `breweries_pipeline`, and toggle the switch to "On".
+2. **Trigger Manually:** Click the "Play" button to start a run immediately.
+3. **Monitor:**
+   - Watch the task progress in the Airflow Graph View.
+   - Check **MinIO** (`bronze` bucket) for raw JSON files.
+   - Check **Nessie UI** to see the Iceberg table snapshots and commits for `silver` and `gold` layers.
 
-   ```env
-   AIRFLOW__CORE__FERNET_KEY=<your-generated-key>
-   ```
+## 💎 Engineering Principles
 
-5. **Create the `.env` file:**
+- **Idempotency:** Silver layer uses `overwritePartitions()` to ensure re-runs don't duplicate data.
+- **Type Safety:** Centralized configuration using Pydantic validates environment variables on startup.
+- **Data Quality:** Inline Spark validation gates prevent corrupted data from reaching the Gold layer.
+- **Schema Evolution:** Iceberg handles schema changes and partitioning without expensive table rewrites.
+- **Unicode Resilience:** Native Python UDFs handle complex character encoding from upstream APIs.
 
-   In the root directory, create a `.env` file with your Airflow and MinIO credentials:
+## 🧪 Development & Testing
 
-   ```env
-   AIRFLOW_USER=airflow
-   AIRFLOW_PASSWORD=airflow
-   AIRFLOW_EMAIL=your-email@gmail.com
-   MINIO_ROOT_USER=admin
-   MINIO_ROOT_PASSWORD=password
-   MINIO_ENDPOINT=minio:9000
-   ```
+```bash
+# Install with dev dependencies
+pip install -e ".[dev,airflow]"
 
-6. **Build the images and start the project:**
+# Run comprehensive test suite (>85% coverage)
+pytest tests/
 
-   ```bash
-   docker-compose up --build -d
-   ```
+# Lint and Format
+ruff check .
+ruff format .
+```
 
-7. **Access the services in your browser:**
+## 🧠 Technical Lessons & Troubleshooting
 
-   - **MinIO:** http://localhost:9001/
-   - **Airflow:** http://localhost:8080/
-   - **Spark Master:** http://localhost:9090/
+During the stabilization of this project (v2.0.0), several critical engineering hurdles were overcome:
 
-8. **Restart Airflow Webserver (if needed):**
+### 1. Python Version Alignment
+The Spark Worker must run the **exact same Python version** as the Airflow Driver. We build Python 3.12.4 from source in the Spark image to prevent `PYTHON_VERSION_MISMATCH` errors.
 
-   ```bash
-   docker-compose restart webserver
-   ```
+### 2. Iceberg FileIO Strategy
+We use `HadoopFileIO` for S3 connectivity. While `S3FileIO` is native, `HadoopFileIO` is more robust in local containerized environments that rely on `hadoop-aws` JARs for S3A filesystem support.
 
-9. **Stop the project:**
+### 3. Nessie Catalog Integration
+For Spark 3.5+, we utilize the Nessie REST endpoint (`type=rest`). This avoids complex JAR dependencies and follows the vendor-neutral Iceberg REST specification.
 
-   ```bash
-   docker-compose down -v
-   ```
+### 4. Memory Management
+The Spark Master and Workers are tuned for local execution with `2g` limits. If encountering OOMs, adjust `SPARK_EXECUTOR_MEMORY` in `.env`.
 
----
-
-## 🧱 Architecture
-
-The project is orchestrated with **Apache Airflow** and uses **Docker Compose** to manage services. The data flows through a medallion architecture (Bronze, Silver, Gold), stored in **MinIO**, processed with **Apache Spark**, and managed with **Apache Hudi**.
-
-### 🔧 Components
-
-- **Apache Airflow**:
-  - Orchestration of pipelines with the DAG `breweries_pipeline.py`
-
-  - Scheduler, Webserver, and Executor configured
-
-  - `spark_docker` connection to submit Spark jobs
-  
-  - Custom `Dockerfile.airflow` with:
-    - `openjdk-17-jdk`
-    - `minio`, `pyspark==3.5.2`, `apache-airflow-providers-apache-spark`
-
-- **MinIO**:
-  - S3-compatible object storage for bronze/silver/gold layers
-  - `minio` service as the storage server
-  - `minio-setup` to automatically create buckets
-
-- **Apache Spark**:
-  - Distributed data processing
-  - `spark-master` and `spark-worker` services
-  - PySpark scripts:
-    - `aggregate_breweries.py`
-    - `breweries_bronze_to_silver.py`
-
-- **PostgreSQL**:
-  - Metadata database for Airflow
-
-- **Apache Hudi**:
-  - Lakehouse format used in the Silver layer
-  - Enables upserts and data versioning
-
----
-
-## 🔄 Data Flow
-
-1. **Bronze Ingestion (`breweries_fetch_and_upload_to_bronze.py`)**:
-   - Uses `PythonOperator` to fetch data from OpenBreweryDB API
-   - Stores raw JSON in the `bronze` bucket in MinIO
-
-2. **Silver Transformation (`breweries_bronze_to_silver.py`)**:
-   - Reads JSON from the Bronze layer
-   - Applies validations and transformations
-   - Writes Hudi table to `silver`, partitioned by `state`
-
-3. **Gold Aggregation (`aggregate_breweries.py`)**:
-   - Reads Hudi data from the Silver layer
-   - Aggregates by `brewery_type` and `state`
-   - Writes Parquet to the `gold` bucket in overwrite mode
-
----
-
-## 🐳 Docker Compose Services
-
-- `spark-master`: Spark master node
-- `spark-worker`: Spark worker nodes
-- `postgres`: Airflow metadata database
-- `webserver`: Airflow web interface
-- `scheduler`: Airflow DAG scheduler
-- `minio`: MinIO object storage server
-- `minio-setup`: Initializes `bronze`, `silver`, and `gold` buckets
-
----
-
-This setup provides a complete, containerized environment for data ingestion, transformation, and analytics with Airflow + Spark + MinIO + Hudi.
+## 📄 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
