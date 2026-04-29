@@ -38,8 +38,10 @@ clean: ## Remove generated files and caches
 	rm -rf .coverage htmlcov/
 
 fernet-key: ## Generate a new Fernet key for Airflow
-	docker run --rm apache/airflow:2.11.0-python3.12 python -c \
-		"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+	@python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+webserver-key: ## Generate a new Webserver Secret Key for Airflow
+	@python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \

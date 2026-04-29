@@ -44,10 +44,10 @@ services:
     <<: *spark-common
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     ports:
-      - "9090:8080"   # Spark UI
-      - "7077:7077"   # Spark master port
+      - "9090:8080" # Spark UI
+      - "7077:7077" # Spark master port
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -76,7 +76,7 @@ services:
     networks:
       - lakehouse
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:19120/api/v2/config"]
+      test: [ "CMD", "curl", "-f", "http://localhost:19120/api/v2/config" ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -89,10 +89,12 @@ services:
       POSTGRES_USER: ${AIRFLOW_USER}
       POSTGRES_PASSWORD: ${AIRFLOW_PASSWORD}
       POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
     networks:
       - lakehouse
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_USER}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${AIRFLOW_USER}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -102,6 +104,7 @@ services:
   scheduler:
     <<: *airflow-common
     command: bash -c "airflow db migrate && airflow users create --username $${AIRFLOW_USER} --firstname Admin --lastname User --role Admin --email $${AIRFLOW_EMAIL} --password $${AIRFLOW_PASSWORD} || true && airflow scheduler"
+    restart: always
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,12 +114,13 @@ services:
   webserver:
     <<: *airflow-common
     command: webserver
+    restart: always
     ports:
-      - "8080:8080"   # Airflow UI
+      - "8080:8080" # Airflow UI
     depends_on:
       - scheduler
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -131,15 +135,15 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_DOMAIN: minio
     ports:
-      - "9001:9001"   # MinIO Console
-      - "9000:9000"   # MinIO API
-    command: ["server", "/data", "--console-address", ":9001"]
+      - "9001:9001" # MinIO Console
+      - "9000:9000" # MinIO API
+    command: [ "server", "/data", "--console-address", ":9001" ]
     volumes:
       - minio-data:/data
     networks:
       - lakehouse
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -170,12 +174,59 @@ services:
     networks:
       - lakehouse
 
+  # ── Dremio (Query Engine) ─────────────────────────
+  dremio:
+    image: dremio/dremio-oss:latest
+    container_name: dremio
+    ports:
+      - "9047:9047" # Dremio UI
+      - "31010:31010" # Dremio JDBC
+    environment:
+      - DREMIO_JAVA_EXTRA_OPTS=-Xss4M
+    volumes:
+      - dremio-data:/opt/dremio/data
+    networks:
+      - lakehouse
+    depends_on:
+      nessie:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9047/apiv2/server_status" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ── Dremio Source Provisioner ─────────────────────
+  dremio-setup:
+    image: curlimages/curl:latest
+    container_name: dremio-setup
+    restart: on-failure
+    env_file:
+      - .env
+    environment:
+      - DREMIO_ADMIN_USER=${DREMIO_ADMIN_USER}
+      - DREMIO_ADMIN_PASSWORD=${DREMIO_ADMIN_PASSWORD}
+    volumes:
+      - ./docker/dremio/setup_sources.sh:/setup_sources.sh
+    entrypoint: [ "/bin/sh", "/setup_sources.sh" ]
+    networks:
+      - lakehouse
+    depends_on:
+      dremio:
+        condition: service_healthy
+
 # ──────────────────────────────────────────────────────
 # Infrastructure
 # ──────────────────────────────────────────────────────
 
 volumes:
   minio-data:
+  dremio-data:
+  nessie-data:
+  airflow-db-data:
 
 networks:
   lakehouse:

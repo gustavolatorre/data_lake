@@ -38,6 +38,7 @@ This project implements a robust, idempotent data lakehouse using **Apache Airfl
 - **Table Format:** [Apache Iceberg 1.5.2](https://iceberg.apache.org/)
 - **Data Catalog:** [Project Nessie 0.79.0](https://projectnessie.org/) (REST API)
 - **Storage:** [MinIO](https://min.io/) (S3-compatible)
+- **Query Engine:** [Dremio OSS](https://www.dremio.com/) (Self-service analytics)
 - **Configuration:** [Pydantic Settings v2](https://docs.pydantic.dev/latest/usage/pydantic_settings/)
 - **Quality & Linting:** [Ruff](https://astral.sh/ruff), [Pytest](https://pytest.org/), [Chispa](https://github.com/MrPowers/chispa)
 
@@ -66,7 +67,7 @@ make fernet-key
 # (Paste the result into AIRFLOW__CORE__FERNET_KEY in airflow.env)
 
 # Generate a Webserver Secret Key:
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+make webserver-key
 # (Paste the result into AIRFLOW__WEBSERVER__SECRET_KEY in airflow.env)
 ```
 
@@ -98,6 +99,7 @@ Wait for all containers to reach a **Healthy** status.
 | **Airflow** | [http://localhost:8080](http://localhost:8080) | `airflow` / `airflow` |
 | **MinIO Console** | [http://localhost:9001](http://localhost:9001) | `admin` / `password` |
 | **Nessie UI** | [http://localhost:19120](http://localhost:19120) | N/A (Public UI) |
+| **Dremio UI** | [http://localhost:9047](http://localhost:9047) | `dremio_admin` / `dremio123` (Auto-provisioned) |
 | **Spark Master** | [http://localhost:9090](http://localhost:9090) | N/A (Status only) |
 
 ## 🏗️ Running the Pipeline
@@ -108,6 +110,7 @@ Wait for all containers to reach a **Healthy** status.
 4. **Verify Results:**
    - **MinIO:** Check the `bronze` bucket for partitioned JSON files.
    - **Nessie:** Explore the `main` branch to see Iceberg table commits for `silver.breweries` and `gold.breweries_summary`.
+   - **Dremio:** Access the UI to find the `lakehouse` source pre-configured. You can run SQL queries directly against your Iceberg tables!
    - **Logs:** Run `make logs-airflow` to monitor task execution in real-time.
 
 ## 💎 Engineering Principles
@@ -138,8 +141,9 @@ During development (v2.0.0), several architectural challenges were addressed:
 
 1. **Python Versioning:** To avoid `PYTHON_VERSION_MISMATCH`, we build Python 3.12.4 from source in the Spark images to match the Airflow environment exactly.
 2. **S3 Connectivity:** We use `HadoopFileIO` instead of `S3FileIO` for better compatibility with local MinIO setups using S3A filesystem JARs.
-3. **Iceberg Catalog:** The project uses the **Nessie REST API** for catalog management, allowing Git-like versioning (branching/tagging) of the entire data lake.
-4. **Memory Management:** If Spark jobs fail due to OOM, increase `SPARK_EXECUTOR_MEMORY` in `.env` (default is `2g`).
+3. **Iceberg Catalog:** The project uses the **Nessie REST API** for catalog management, allowing Git-like versioning (branching/tagging).
+4. **Auto-Provisioning:** We use a sidecar container (`dremio-setup`) to automatically create the Dremio admin user and link the Nessie catalog on first launch.
+5. **Memory Management:** If Spark jobs fail due to OOM, increase `SPARK_EXECUTOR_MEMORY` in `.env` (default is `2g`).
 
 ## 🔒 Security
 
