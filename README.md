@@ -1,4 +1,4 @@
-# Professional Data Lakehouse Pipeline
+# Data Lakehouse Pipeline
 
 > **v2.0.0** — A professional-grade data engineering pipeline demonstrating modern medallion architecture.
 
