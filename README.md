@@ -44,50 +44,71 @@ This project implements a robust, idempotent data lakehouse using **Apache Airfl
 ## 🚀 Quickstart
 
 ### 1. Prerequisites
-- Docker & Docker Compose
-- Python 3.12+ (for local development)
-- `make` (optional)
+- **Docker & Docker Compose** (Desktop or Engine)
+- **Python 3.12+** (required for local development/testing)
+- **Make** (optional, but recommended for automation)
 
-### 2. Setup
+### 2. Setup Environment
+You must configure two environment files to handle infrastructure and Airflow settings respectively.
+
 ```bash
-# Clone and enter
+# Clone the repository
 git clone <repo-url>
 cd data_lake
 
-# Environment config
+# 1. Copy example files
 cp .env.example .env
 cp airflow.env.example airflow.env
 
-# Generate security keys and add them to the .env files
-# 1. Generate a Fernet key for Airflow:
-make fernet-key
-# 2. Generate a Secret Key for Airflow Webserver:
+# 2. Generate required Airflow keys
+# Generate a Fernet key:
+make fernet-key 
+# (Paste the result into AIRFLOW__CORE__FERNET_KEY in airflow.env)
+
+# Generate a Webserver Secret Key:
 python -c "import secrets; print(secrets.token_urlsafe(32))"
+# (Paste the result into AIRFLOW__WEBSERVER__SECRET_KEY in airflow.env)
 ```
 
 > [!IMPORTANT]
-> Never commit `.env` or `airflow.env` files to version control. They are ignored by default in this project.
+> **Credential Synchronization:** The Airflow variables in `airflow.env` **must match** the MinIO root credentials defined in your `.env` file. If they differ, the pipeline will fail to authenticate with the storage layer.
+> ```env
+> # In airflow.env, these must match MINIO_ROOT_USER/PASSWORD from .env
+> AIRFLOW_VAR_MINIO_ROOT_USER=admin
+> AIRFLOW_VAR_MINIO_ROOT_PASSWORD=password
+> ```
 
 ### 3. Launch Infrastructure
+Use the `Makefile` for a streamlined startup or run docker-compose directly.
+
 ```bash
-# Start all services in the background
+# Option A: Using Makefile (recommended)
+make up
+
+# Option B: Using Docker Compose
 docker-compose up --build -d
 ```
 
-### 4. Access UIs
-- **Airflow:** [http://localhost:8080](http://localhost:8080) (Credentials in `.env`)
-- **MinIO:** [http://localhost:9001](http://localhost:9001) (Credentials in `.env`)
-- **Nessie:** [http://localhost:19120](http://localhost:19120)
-- **Spark:** [http://localhost:9090](http://localhost:9090)
+Wait for all containers to reach a **Healthy** status.
+
+### 4. Access Monitoring & UIs
+
+| Service | URL | Credentials (Default) |
+| :--- | :--- | :--- |
+| **Airflow** | [http://localhost:8080](http://localhost:8080) | `airflow` / `airflow` |
+| **MinIO Console** | [http://localhost:9001](http://localhost:9001) | `admin` / `password` |
+| **Nessie UI** | [http://localhost:19120](http://localhost:19120) | N/A (Public UI) |
+| **Spark Master** | [http://localhost:9090](http://localhost:9090) | N/A (Status only) |
 
 ## 🏗️ Running the Pipeline
 
-1. **Activate the DAG:** Open the Airflow UI, find `breweries_pipeline`, and toggle the switch to "On".
-2. **Trigger Manually:** Click the "Play" button to start a run immediately.
-3. **Monitor:**
-   - Watch the task progress in the Airflow Graph View.
-   - Check **MinIO** (`bronze` bucket) for raw JSON files.
-   - Check **Nessie UI** to see the Iceberg table snapshots and commits for `silver` and `gold` layers.
+1. **Access Airflow:** Log in at `localhost:8080`.
+2. **Activate DAG:** Locate `breweries_pipeline` and toggle it to **On**.
+3. **Trigger:** Click the "Play" button to start an immediate execution.
+4. **Verify Results:**
+   - **MinIO:** Check the `bronze` bucket for partitioned JSON files.
+   - **Nessie:** Explore the `main` branch to see Iceberg table commits for `silver.breweries` and `gold.breweries_summary`.
+   - **Logs:** Run `make logs-airflow` to monitor task execution in real-time.
 
 ## 💎 Engineering Principles
 
@@ -100,38 +121,31 @@ docker-compose up --build -d
 ## 🧪 Development & Testing
 
 ```bash
-# Install with dev dependencies
+# Install local environment with dev dependencies
 pip install -e ".[dev,airflow]"
 
 # Run comprehensive test suite (>85% coverage)
-pytest tests/
+make test
 
 # Lint and Format
-ruff check .
-ruff format .
+make lint
+make fmt
 ```
 
-## 🧠 Technical Lessons & Troubleshooting
+## 🧠 Troubleshooting & Technical Decisions
 
-During the stabilization of this project (v2.0.0), several critical engineering hurdles were overcome:
+During development (v2.0.0), several architectural challenges were addressed:
 
-### 1. Python Version Alignment
-The Spark Worker must run the **exact same Python version** as the Airflow Driver. We build Python 3.12.4 from source in the Spark image to prevent `PYTHON_VERSION_MISMATCH` errors.
-
-### 2. Iceberg FileIO Strategy
-We use `HadoopFileIO` for S3 connectivity. While `S3FileIO` is native, `HadoopFileIO` is more robust in local containerized environments that rely on `hadoop-aws` JARs for S3A filesystem support.
-
-### 3. Nessie Catalog Integration
-For Spark 3.5+, we utilize the Nessie REST endpoint (`type=rest`). This avoids complex JAR dependencies and follows the vendor-neutral Iceberg REST specification.
-
-### 4. Memory Management
-The Spark Master and Workers are tuned for local execution with `2g` limits. If encountering OOMs, adjust `SPARK_EXECUTOR_MEMORY` in `.env`.
+1. **Python Versioning:** To avoid `PYTHON_VERSION_MISMATCH`, we build Python 3.12.4 from source in the Spark images to match the Airflow environment exactly.
+2. **S3 Connectivity:** We use `HadoopFileIO` instead of `S3FileIO` for better compatibility with local MinIO setups using S3A filesystem JARs.
+3. **Iceberg Catalog:** The project uses the **Nessie REST API** for catalog management, allowing Git-like versioning (branching/tagging) of the entire data lake.
+4. **Memory Management:** If Spark jobs fail due to OOM, increase `SPARK_EXECUTOR_MEMORY` in `.env` (default is `2g`).
 
 ## 🔒 Security
 
-- **Secrets Management:** This project uses a dual `.env` and `airflow.env` strategy.
-- **Environment Isolation:** Hardcoded defaults have been removed from the codebase to ensure all credentials must be explicitly provided via environment variables.
-- **Audit:** Automated security scans are performed to prevent secret leaks and ensure Pydantic validation of all critical settings.
+- **Secrets Strategy:** Credentials are never hardcoded; they are injected via `.env` (infrastructure) and `airflow.env` (application).
+- **Network Isolation:** All services communicate within a dedicated Docker bridge network.
+- **Security Audit:** `.env` files are strictly ignored by `.gitignore` to prevent accidental credential leaks.
 
 ## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
