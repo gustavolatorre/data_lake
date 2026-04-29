@@ -32,8 +32,8 @@ class Settings(BaseSettings):
 
     # MinIO
     minio_endpoint: str = "minio:9000"
-    minio_root_user: str = "admin"
-    minio_root_password: str = "password"
+    minio_root_user: str
+    minio_root_password: str
 
     # Nessie
     nessie_uri: str = "http://nessie:19120/api/v2"

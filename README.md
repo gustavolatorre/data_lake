@@ -56,11 +56,17 @@ cd data_lake
 
 # Environment config
 cp .env.example .env
+cp airflow.env.example airflow.env
 
-# Generate an Airflow Fernet key and add it to .env
-# Copy the output of this command to AIRFLOW__CORE__FERNET_KEY in .env
+# Generate security keys and add them to the .env files
+# 1. Generate a Fernet key for Airflow:
 make fernet-key
+# 2. Generate a Secret Key for Airflow Webserver:
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+> [!IMPORTANT]
+> Never commit `.env` or `airflow.env` files to version control. They are ignored by default in this project.
 
 ### 3. Launch Infrastructure
 ```bash
@@ -69,8 +75,8 @@ docker-compose up --build -d
 ```
 
 ### 4. Access UIs
-- **Airflow:** [http://localhost:8080](http://localhost:8080) (`airflow`/`airflow`)
-- **MinIO:** [http://localhost:9001](http://localhost:9001) (`admin`/`password`)
+- **Airflow:** [http://localhost:8080](http://localhost:8080) (Credentials in `.env`)
+- **MinIO:** [http://localhost:9001](http://localhost:9001) (Credentials in `.env`)
 - **Nessie:** [http://localhost:19120](http://localhost:19120)
 - **Spark:** [http://localhost:9090](http://localhost:9090)
 
@@ -120,6 +126,12 @@ For Spark 3.5+, we utilize the Nessie REST endpoint (`type=rest`). This avoids c
 
 ### 4. Memory Management
 The Spark Master and Workers are tuned for local execution with `2g` limits. If encountering OOMs, adjust `SPARK_EXECUTOR_MEMORY` in `.env`.
+
+## 🔒 Security
+
+- **Secrets Management:** This project uses a dual `.env` and `airflow.env` strategy.
+- **Environment Isolation:** Hardcoded defaults have been removed from the codebase to ensure all credentials must be explicitly provided via environment variables.
+- **Audit:** Automated security scans are performed to prevent secret leaks and ensure Pydantic validation of all critical settings.
 
 ## 📄 License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

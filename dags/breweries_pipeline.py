@@ -35,8 +35,8 @@ SPARK_CONF = {
     "spark.sql.catalog.nessie.io-impl": "org.apache.iceberg.hadoop.HadoopFileIO",
     "spark.sql.catalog.nessie.warehouse": "s3a://warehouse/",
     "spark.hadoop.fs.s3a.endpoint": "http://minio:9000",
-    "spark.hadoop.fs.s3a.access.key": "{{ var.value.get('MINIO_ROOT_USER', 'admin') }}",
-    "spark.hadoop.fs.s3a.secret.key": "{{ var.value.get('MINIO_ROOT_PASSWORD', 'password') }}",
+    "spark.hadoop.fs.s3a.access.key": "{{ var.value.MINIO_ROOT_USER }}",
+    "spark.hadoop.fs.s3a.secret.key": "{{ var.value.MINIO_ROOT_PASSWORD }}",
     "spark.hadoop.fs.s3a.path.style.access": "true",
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
 }
