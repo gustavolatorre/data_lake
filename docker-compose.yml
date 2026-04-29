@@ -1,69 +1,128 @@
+# ──────────────────────────────────────────────────────
+# Reusable service definitions
+# ──────────────────────────────────────────────────────
+
 x-spark-common: &spark-common
-  image: bitnami/spark:3.5.2
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.spark
   volumes:
-    - ./jobs:/opt/bitnami/spark/jobs
+    - ./src:/opt/spark/src
+    - ./jobs:/opt/spark/jobs
   env_file:
     - .env
   networks:
-    - app-network
+    - lakehouse
 
 x-airflow-common: &airflow-common
   build:
     context: .
-    dockerfile: Dockerfile.airflow
+    dockerfile: docker/Dockerfile.airflow
   env_file:
     - airflow.env
     - .env
   volumes:
-    - ./jobs:/opt/airflow/jobs
+    - ./src:/opt/airflow/src
     - ./dags:/opt/airflow/dags
+    - ./jobs:/opt/airflow/jobs
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
   depends_on:
-    - postgres
+    postgres:
+      condition: service_healthy
   networks:
-    - app-network
+    - lakehouse
+
+# ──────────────────────────────────────────────────────
+# Services
+# ──────────────────────────────────────────────────────
 
 services:
+
+  # ── Spark ──────────────────────────────────────────
   spark-master:
     <<: *spark-common
-    command: bin/spark-class org.apache.spark.deploy.master.Master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     ports:
-      - "9090:8080"
-      - "7077:7077"
+      - "9090:8080"   # Spark UI
+      - "7077:7077"   # Spark master port
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   spark-worker:
-      <<: *spark-common
-      command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
-      depends_on:
-        - spark-master
-      environment:
-        SPARK_MODE: worker
-        SPARK_WORKER_CORES: 2
-        SPARK_WORKER_MEMORY: 2g
-        SPARK_MASTER_URL: spark://spark-master:7077
+    <<: *spark-common
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      SPARK_MODE: worker
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_MASTER_URL: spark://spark-master:7077
 
+  # ── Nessie (Iceberg REST Catalog) ─────────────────
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.79.0
+    container_name: nessie
+    ports:
+      - "19120:19120"
+    environment:
+      QUARKUS_HTTP_PORT: 19120
+    networks:
+      - lakehouse
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19120/api/v2/config"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── PostgreSQL (Airflow metadata) ─────────────────
   postgres:
     image: postgres:14.0
     environment:
-      - POSTGRES_USER=${AIRFLOW_USER}
-      - POSTGRES_PASSWORD=${AIRFLOW_PASSWORD}
-      - POSTGRES_DB=airflow
+      POSTGRES_USER: ${AIRFLOW_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_PASSWORD}
+      POSTGRES_DB: airflow
     networks:
-      - app-network
+      - lakehouse
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Airflow ───────────────────────────────────────
+  scheduler:
+    <<: *airflow-common
+    command: bash -c "airflow db migrate && airflow users create --username $${AIRFLOW_USER} --firstname Admin --lastname User --role Admin --email $${AIRFLOW_EMAIL} --password $${AIRFLOW_PASSWORD} || true && airflow scheduler"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nessie:
+        condition: service_healthy
 
   webserver:
     <<: *airflow-common
     command: webserver
     ports:
-      - "8080:8080"
+      - "8080:8080"   # Airflow UI
     depends_on:
       - scheduler
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
-  scheduler:
-    <<: *airflow-common
-    command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_USER} --firstname Joe --lastname Doe --role Admin --email ${AIRFLOW_EMAIL} --password ${AIRFLOW_PASSWORD} && airflow scheduler"
-  
+  # ── MinIO (S3-compatible storage) ─────────────────
   minio:
     image: minio/minio
     container_name: minio
@@ -71,18 +130,18 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_DOMAIN: minio
-    networks:
-      - app-network
     ports:
-      - 9001:9001
-      - 9000:9000
-    command: [ "server", "/data", "--console-address", ":9001" ]
+      - "9001:9001"   # MinIO Console
+      - "9000:9000"   # MinIO API
+    command: ["server", "/data", "--console-address", ":9001"]
     volumes:
-      - ./minio/data:/data
+      - minio-data:/data
+    networks:
+      - lakehouse
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
+      interval: 15s
+      timeout: 10s
       retries: 3
       start_period: 10s
 
@@ -94,26 +153,30 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c '
-        echo "Aguardando MinIO ficar pronto...";
-        until mc alias set local http://minio:9000 "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}"; do
-          echo "MinIO ainda não está pronto, aguardando 2s...";
+        echo "Waiting for MinIO...";
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
           sleep 2;
         done;
-
-        echo "Conexão com MinIO bem-sucedida. Criando buckets...";
-
+        echo "Creating buckets...";
         mc mb --ignore-existing local/bronze &&
         mc mb --ignore-existing local/silver &&
         mc mb --ignore-existing local/gold &&
-        echo "Buckets criados com sucesso." &&
+        mc mb --ignore-existing local/warehouse &&
+        echo "Buckets created successfully." &&
         exit 0;
       '
-    environment:
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - AWS_REGION=us-east-1
+    env_file:
+      - .env
     networks:
-      - app-network
+      - lakehouse
+
+# ──────────────────────────────────────────────────────
+# Infrastructure
+# ──────────────────────────────────────────────────────
+
+volumes:
+  minio-data:
 
 networks:
-  app-network:
+  lakehouse:
+    driver: bridge

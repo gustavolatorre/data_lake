@@ -1,0 +1,43 @@
+FROM apache/airflow:2.11.0-python3.12
+
+USER root
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        python3-dev \
+        openjdk-17-jdk-headless && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+USER airflow
+
+COPY pyproject.toml /opt/airflow/pyproject.toml
+
+RUN pip install --no-cache-dir \
+    pydantic-settings>=2.0 \
+    minio>=7.2.0 \
+    requests>=2.31.0 \
+    python-dotenv>=1.0.0 \
+    apache-airflow-providers-apache-spark>=4.0 \
+    pyspark==3.5.2
+
+# Download Iceberg + Hadoop-AWS + AWS SDK v1 JARs into PySpark's jars directory
+# so the driver (running in this container) has them on the system classpath.
+# These MUST match the versions baked into Dockerfile.spark for the executors.
+ARG PYSPARK_JARS=/home/airflow/.local/lib/python3.12/site-packages/pyspark/jars
+ARG ICEBERG_VERSION=1.5.2
+ARG NESSIE_VERSION=0.79.0
+ARG HADOOP_AWS_VERSION=3.3.4
+ARG AWS_SDK_V1_VERSION=1.12.262
+
+RUN curl -fSL "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/${ICEBERG_VERSION}/iceberg-spark-runtime-3.5_2.12-${ICEBERG_VERSION}.jar" \
+        -o ${PYSPARK_JARS}/iceberg-spark-runtime.jar && \
+    curl -fSL "https://repo1.maven.org/maven2/org/projectnessie/nessie-integrations/nessie-spark-extensions-3.5_2.12/${NESSIE_VERSION}/nessie-spark-extensions-3.5_2.12-${NESSIE_VERSION}.jar" \
+        -o ${PYSPARK_JARS}/nessie-spark-extensions.jar && \
+    curl -fSL "https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" \
+        -o ${PYSPARK_JARS}/hadoop-aws.jar && \
+    curl -fSL "https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_V1_VERSION}/aws-java-sdk-bundle-${AWS_SDK_V1_VERSION}.jar" \
+        -o ${PYSPARK_JARS}/aws-java-sdk-bundle.jar
