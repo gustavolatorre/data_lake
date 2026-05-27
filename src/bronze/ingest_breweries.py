@@ -42,8 +42,8 @@ BREWERY_SCHEMA = StructType(
 def ingest(execution_date: str) -> None:
     """Execute the Staging → Bronze ingestion.
 
-    Reads JSON from staging, adds metadata columns, and appends to the
-    Bronze Iceberg table.
+    Reads JSON from staging, adds metadata columns, and writes idempotently
+    to the Bronze Iceberg table via overwritePartitions on the daily partition.
 
     Args:
         execution_date: Date string (YYYY-MM-DD) for the staging partition to read.
@@ -74,28 +74,39 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
     df = df.withColumn("ingestion_date", F.lit(execution_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
 
-    # Validate before writing — fail fast if staging produced no data
-    check_row_count(df, min_rows=1)
-    log_quality_summary(df, "bronze", critical_columns=["id", "name", "brewery_type"])
+    # Cache before quality checks + write — avoids 3x re-scan of the JSON in S3
+    df.cache()
+    try:
+        # Validate before writing — fail fast if staging produced no data
+        check_row_count(df, min_rows=1)
+        log_quality_summary(df, "bronze", critical_columns=["id", "name", "brewery_type"])
 
-    # Write to Iceberg Bronze (Append Only)
-    table_name = "nessie.bronze.breweries"
-    logger.info("Writing Bronze Iceberg table: %s", table_name)
+        # Write to Iceberg Bronze
+        # Idempotency: overwritePartitions() atomically replaces only the partitions
+        # present in `df` (i.e. the current ingestion_date). Re-running the same
+        # execution_date produces the same final state — no duplicates.
+        table_name = "nessie.bronze.breweries"
+        logger.info("Writing Bronze Iceberg table: %s", table_name)
 
-    spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.bronze")
+        spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.bronze")
 
-    writer = df.writeTo(table_name).tableProperty("format-version", "2").partitionedBy(
-        F.col("ingestion_date")
-    )
+        writer = (
+            df.writeTo(table_name)
+            .tableProperty("format-version", "2")
+            .partitionedBy(F.col("ingestion_date"))
+        )
 
-    if spark.catalog.tableExists(table_name):
-        logger.info("Table %s exists. Appending new records.", table_name)
-        writer.append()
-    else:
-        logger.info("Table %s does not exist. Creating and inserting initial records.", table_name)
-        writer.create()
+        if spark.catalog.tableExists(table_name):
+            logger.info("Table %s exists. Overwriting partition for ingestion_date.", table_name)
+            writer.overwritePartitions()
+        else:
+            logger.info("Table %s does not exist. Creating with initial partition.", table_name)
+            writer.create()
 
-    logger.info("Bronze ingestion complete: %d records added", df.count())
+        record_count = df.count()
+        logger.info("Bronze ingestion complete: %d records written for %s", record_count, execution_date)
+    finally:
+        df.unpersist()
 
 
 if __name__ == "__main__":
