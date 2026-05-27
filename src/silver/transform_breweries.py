@@ -164,7 +164,9 @@ def _execute_merge(spark: SparkSession) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    from src.utils.logging_config import setup_logging
+
+    setup_logging()
 
     if len(sys.argv) < 2:
         logger.error("Usage: transform_breweries.py <execution_date>")

@@ -28,10 +28,14 @@ def create_minio_client() -> Minio:
         settings.minio_endpoint,
         access_key=settings.minio_root_user,
         secret_key=settings.minio_root_password,
-        secure=False,
+        secure=settings.minio_secure,
     )
 
-    logger.info("MinIO client created for endpoint '%s'", settings.minio_endpoint)
+    logger.info(
+        "MinIO client created for endpoint '%s' (TLS=%s)",
+        settings.minio_endpoint,
+        settings.minio_secure,
+    )
     return client
 
 

@@ -99,7 +99,9 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    from src.utils.logging_config import setup_logging
+
+    setup_logging()
 
     if len(sys.argv) < 2:
         logger.error("Usage: ingest_to_bronze.py <execution_date>")

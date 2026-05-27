@@ -115,10 +115,36 @@ WHEN NOT MATCHED BY SOURCE THEN
 The Gold analytics layer serves downstream business intelligence and reporting.
 *   **Dremio Query Virtualization:** Dremio connects directly to the Nessie catalog, acting as our high-performance Ad-hoc SQL execution engine.
 *   **dbt Core Modeling:** dbt compiles and models datasets incrementally within Dremio spaces:
-    *   **Dimensions:** `dim_locations` and `dim_brewery_types`.
-    *   **Facts:** `fact_breweries` (containing metrics on active entities).
-    *   **Marts:** `mart_brewery_coverage` (regional business metrics).
+    *   **Dimensions:** `dim_locations` and `dim_brewery_types` (materialized as **views** — fast to rebuild, derived directly from `stg_silver_breweries`).
+    *   **Facts:** `fact_breweries` — materialized as an **incremental table** with `merge` strategy on `brewery_key`, so only deltas after the last `updated_at` are processed.
+    *   **Marts:** `mart_brewery_coverage` — materialized as a **table** for fast BI consumption.
+    *   **Seeds:** `brewery_type_mapping.csv` — canonical list of the 10 OpenBreweryDB types; a `relationships` test on `dim_brewery_types` blocks unknown values from reaching Gold.
+    *   **Macros:** `surrogate_key(fields)` — normalizes via `UPPER(TRIM(COALESCE(field, '')))` and emits `MD5(field1 || '|' || ...)`. Used by both dimensions.
+    *   **Snapshot:** `snap_breweries` — timestamp-based snapshot on Silver's `updated_at`, producing `dbt_valid_from`/`dbt_valid_to` for point-in-time queries.
 *   **Strict Quality Gates:** We enforce strict data quality validations (`not_null`, `unique`, and foreign key referential integrity) via dbt test gates. The output analytical Asset is only updated if all quality checks pass.
+
+### 5. Bronze Table Schema (Reference)
+The Bronze table preserves every field returned by the OpenBreweryDB API plus two ingestion metadata columns:
+
+| Column | Type | Source |
+| :--- | :--- | :--- |
+| `id` | STRING | API |
+| `name` | STRING | API |
+| `brewery_type` | STRING | API |
+| `address_1`, `address_2`, `address_3` | STRING | API |
+| `city`, `state_province`, `state`, `country` | STRING | API |
+| `postal_code`, `street`, `phone`, `website_url` | STRING | API |
+| `longitude`, `latitude` | DOUBLE | API |
+| `ingestion_date` | STRING (YYYY-MM-DD) | injected — partition key |
+| `ingested_at` | TIMESTAMP (UTC) | injected — `F.current_timestamp()` |
+
+The Silver layer trims this down to the analytical subset (`id`, `name`, `brewery_type`, `address_1`, `city`, `state`, `country`, `is_active`, `updated_at`, `ingestion_date`) and is **partitioned by `state`**, which speeds up Gold queries that filter or aggregate by geography.
+
+### 6. Auto-Provisioning of Services
+Two pieces of plumbing make the stack work out of the box without manual UI clicks:
+
+*   **Dremio sources** (`docker/dremio/setup_sources.sh`): runs once via the `dremio-setup` container after Dremio becomes healthy. Registers the Nessie catalog and the MinIO `warehouse` bucket as Dremio sources, so dbt can immediately query `lakehouse.silver.breweries` and write into the `gold` space.
+*   **Airflow Spark connection** (`plugins/create_spark_connection.py`): a startup-time Airflow plugin that creates the `spark_docker` connection (pointing at `spark://spark-master:7077`) in the Airflow metadata DB if it doesn't already exist. The DAGs reference this connection via `conn_id="spark_docker"` — no need to add it manually through the Airflow UI.
 
 ---
 

@@ -1,5 +1,8 @@
 data_lake_gold:
-  target: dev
+  # Default target; override per-invocation with `dbt run --target staging` or
+  # via the DBT_TARGET environment variable when wiring CI/CD.
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+
   outputs:
     dev:
       type: dremio
@@ -9,5 +12,30 @@ data_lake_gold:
       user: "{{ env_var('DREMIO_ADMIN_USER') }}"
       password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
       space: "lakehouse"
+      schema: "gold_dev"
+      datalake: "lakehouse"
+      threads: 4
+
+    staging:
+      type: dremio
+      software_host: "{{ env_var('DREMIO_HOST', 'dremio') }}"
+      port: "{{ env_var('DREMIO_PORT', '9047') | int }}"
+      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'false') | as_bool }}"
+      user: "{{ env_var('DREMIO_ADMIN_USER') }}"
+      password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
+      space: "lakehouse"
+      schema: "gold_staging"
+      datalake: "lakehouse"
+      threads: 4
+
+    prod:
+      type: dremio
+      software_host: "{{ env_var('DREMIO_HOST') }}"
+      port: "{{ env_var('DREMIO_PORT', '9047') | int }}"
+      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'true') | as_bool }}"
+      user: "{{ env_var('DREMIO_ADMIN_USER') }}"
+      password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
+      space: "lakehouse"
       schema: "gold"
       datalake: "lakehouse"
+      threads: 8
