@@ -17,11 +17,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dev dependencies
-        run: uv pip install --system -e ".[dev]"
+      - name: Create venv and install dev dependencies
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
 
       - name: Ruff lint
-        run: ruff check src/ tests/ dags/
+        run: uv run ruff check src/ tests/ dags/
 
   test:
     name: Test
@@ -39,8 +41,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dev dependencies
-        run: uv pip install --system -e ".[dev]"
+      - name: Create venv and install dev dependencies
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: pytest --cov=src --cov-report=term-missing tests/
+        env:
+          MINIO_ROOT_USER: test-user
+          MINIO_ROOT_PASSWORD: test-password
+        run: uv run pytest --cov=src --cov-report=term-missing tests/
