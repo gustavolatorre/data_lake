@@ -39,7 +39,12 @@ def main() -> int:
             "use a strong value in .env for non-local environments.\n"
         )
 
-    payload = {user: _hash(password)}
+    # NOTE: Airflow 3's SimpleAuthManager does NOT support hashed passwords (like bcrypt).
+    # It performs a direct plaintext string comparison. Storing it as a bcrypt hash will
+    # cause authentication to fail (401 Unauthorized). Therefore, we must store the plaintext
+    # password here. Since this file is located at a container-internal path that is never
+    # mounted to the host, it remains secure from host-level leaks.
+    payload = {user: password}
     OUTPUT_PATH.write_text(json.dumps(payload), encoding="utf-8")
     OUTPUT_PATH.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
 
