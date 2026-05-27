@@ -1,7 +1,6 @@
 """Unit tests for data quality check functions."""
 
 import pytest
-from pyspark.sql import functions as F
 
 from src.utils.data_quality import check_null_counts, check_row_count, check_schema, log_quality_summary
 

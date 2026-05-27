@@ -1,12 +1,11 @@
 """Unit tests for Bronze layer — API fetch and upload."""
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 import responses
 
-from src.bronze.fetch_breweries import _fetch_page, _upload_json, fetch_and_upload
+from src.staging.fetch_breweries import _fetch_page, _upload_json, fetch_and_upload
 
 
 class TestFetchPage:
@@ -80,7 +79,9 @@ class TestFetchPage:
             status=500,
         )
 
-        with pytest.raises(Exception):
+        import requests
+
+        with pytest.raises(requests.exceptions.HTTPError):
             _fetch_page(
                 base_url="https://api.openbrewerydb.org/v1/breweries",
                 page=1,
@@ -110,8 +111,8 @@ class TestFetchAndUpload:
     """Tests for the main fetch_and_upload function."""
 
     @responses.activate
-    @patch("src.bronze.fetch_breweries.create_minio_client")
-    @patch("src.bronze.fetch_breweries.ensure_bucket_exists")
+    @patch("src.staging.fetch_breweries.create_minio_client")
+    @patch("src.staging.fetch_breweries.ensure_bucket_exists")
     def test_fetch_and_upload_two_pages(self, mock_ensure, mock_client):
         """Should fetch all pages and return total record count."""
         page1 = [{"id": str(i), "name": f"Brewery {i}"} for i in range(50)]
@@ -130,8 +131,8 @@ class TestFetchAndUpload:
         assert mock_minio.put_object.call_count == 2
 
     @responses.activate
-    @patch("src.bronze.fetch_breweries.create_minio_client")
-    @patch("src.bronze.fetch_breweries.ensure_bucket_exists")
+    @patch("src.staging.fetch_breweries.create_minio_client")
+    @patch("src.staging.fetch_breweries.ensure_bucket_exists")
     def test_fetch_and_upload_empty_api(self, mock_ensure, mock_client):
         """Should return 0 when API returns empty on first page."""
         responses.add(responses.GET, "https://api.openbrewerydb.org/v1/breweries", json=[], status=200)

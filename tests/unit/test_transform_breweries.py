@@ -1,36 +1,60 @@
 """Unit tests for Silver layer — brewery transformations."""
 
-import pytest
-
-from src.silver.transform_breweries import normalize_unicode
+from src.silver.transform_breweries import _apply_native_transformations
 
 
 class TestNormalizeUnicode:
-    """Tests for the normalize_unicode function."""
+    """Tests for the native unicode normalization in Silver layer."""
 
-    def test_removes_diacritics(self):
-        """Should remove accent marks from characters."""
-        assert normalize_unicode("Kärnten") == "Karnten"
-        assert normalize_unicode("Niederösterreich") == "Niederosterreich"
+    def test_removes_diacritics(self, spark):
+        """Should remove accent marks from characters using Spark translate."""
+        from pyspark.sql import Row
 
-    def test_preserves_plain_ascii(self):
+        # Test standard accented strings
+        test_rows = [
+            Row(id="1", state="Kärnten", ingested_at="2026-05-23 12:00:00"),
+            Row(id="2", state="Niederösterreich", ingested_at="2026-05-23 12:00:00"),
+            Row(id="3", state="São Paulo", ingested_at="2026-05-23 12:00:00"),
+            Row(id="4", state="Zürich", ingested_at="2026-05-23 12:00:00"),
+            Row(id="5", state="Päijät-Häme", ingested_at="2026-05-23 12:00:00"),
+        ]
+        df = spark.createDataFrame(test_rows)
+        transformed_df = _apply_native_transformations(df)
+        results = {row.id: row.state for row in transformed_df.collect()}
+
+        assert results["1"] == "Karnten"
+        assert results["2"] == "Niederosterreich"
+        assert results["3"] == "Sao Paulo"
+        assert results["4"] == "Zurich"
+        assert results["5"] == "Paijat-Hame"
+
+    def test_preserves_plain_ascii(self, spark):
         """Should not modify plain ASCII strings."""
-        assert normalize_unicode("Oklahoma") == "Oklahoma"
-        assert normalize_unicode("New York") == "New York"
+        from pyspark.sql import Row
 
-    def test_handles_none(self):
-        """Should return None for None input."""
-        assert normalize_unicode(None) is None
+        test_rows = [
+            Row(id="1", state="Oklahoma", ingested_at="2026-05-23 12:00:00"),
+            Row(id="2", state="New York", ingested_at="2026-05-23 12:00:00"),
+        ]
+        df = spark.createDataFrame(test_rows)
+        transformed_df = _apply_native_transformations(df)
+        results = {row.id: row.state for row in transformed_df.collect()}
 
-    def test_handles_empty_string(self):
-        """Should return empty string for empty input."""
-        assert normalize_unicode("") == ""
+        assert results["1"] == "Oklahoma"
+        assert results["2"] == "New York"
 
-    def test_handles_mixed_accents(self):
-        """Should handle strings with multiple accented characters."""
-        assert normalize_unicode("São Paulo") == "Sao Paulo"
-        assert normalize_unicode("Zürich") == "Zurich"
-        assert normalize_unicode("Päijät-Häme") == "Paijat-Hame"
+    def test_handles_none(self, spark):
+        """Should replace None with sentinel value __UNKNOWN__."""
+        from pyspark.sql import Row
+
+        test_rows = [
+            Row(id="1", state=None, ingested_at="2026-05-23 12:00:00"),
+        ]
+        df = spark.createDataFrame(test_rows)
+        transformed_df = _apply_native_transformations(df)
+        results = {row.id: row.state for row in transformed_df.collect()}
+
+        assert results["1"] == "__UNKNOWN__"
 
 
 class TestSilverTransformations:
@@ -86,10 +110,10 @@ class TestSilverTransformations:
     def test_unicode_normalization_on_state(self, spark, sample_df):
         """Should normalize unicode characters in the state column."""
         from pyspark.sql import functions as F
-        from pyspark.sql.types import StringType
 
-        normalize_udf = F.udf(normalize_unicode, StringType())
-        df = sample_df.withColumn("state", normalize_udf(F.col("state")))
+        # _apply_native_transformations expects an ingested_at column to order window function
+        df_with_ingested_at = sample_df.withColumn("ingested_at", F.current_timestamp())
+        df = _apply_native_transformations(df_with_ingested_at)
 
         karnten_rows = df.filter(F.col("state") == "Karnten").count()
         assert karnten_rows == 1
@@ -97,8 +121,21 @@ class TestSilverTransformations:
     def test_schema_has_expected_columns(self, sample_df):
         """Should contain all 16 expected columns."""
         expected = {
-            "id", "name", "brewery_type", "address_1", "address_2",
-            "address_3", "city", "state_province", "postal_code", "country",
-            "longitude", "latitude", "phone", "website_url", "state", "street",
+            "id",
+            "name",
+            "brewery_type",
+            "address_1",
+            "address_2",
+            "address_3",
+            "city",
+            "state_province",
+            "postal_code",
+            "country",
+            "longitude",
+            "latitude",
+            "phone",
+            "website_url",
+            "state",
+            "street",
         }
         assert set(sample_df.columns) == expected
