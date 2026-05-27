@@ -11,9 +11,8 @@ with grouped_locations as (
 )
 
 select
-    md5(country_upper || '|' || state_upper || '|' || city_upper) as location_key,
+    {{ surrogate_key(['country_upper', 'state_upper', 'city_upper']) }} as location_key,
     city,
     state,
     country
 from grouped_locations
-

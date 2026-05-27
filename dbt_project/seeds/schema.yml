@@ -1,0 +1,13 @@
+version: 2
+
+seeds:
+  - name: brewery_type_mapping
+    description: "Canonical list of brewery types accepted by the OpenBreweryDB API. Used to validate that dim_brewery_types only contains known values."
+    columns:
+      - name: brewery_type
+        description: "The canonical brewery type code."
+        tests:
+          - unique
+          - not_null
+      - name: description
+        description: "Human-readable description of the brewery type."

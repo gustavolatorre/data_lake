@@ -23,8 +23,9 @@ logs-spark: ## Tail Spark master logs
 test: ## Run tests with coverage
 	uv run pytest --cov=src --cov-report=term-missing tests/
 
-lint: ## Run ruff linter
+lint: ## Run ruff linter and mypy
 	uv run ruff check src/ tests/ dags/
+	uv run mypy src/
 
 fmt: ## Auto-format code with ruff
 	uv run ruff format src/ tests/ dags/
