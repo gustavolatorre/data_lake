@@ -54,6 +54,7 @@ known-first-party = ["src"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
+pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["src"]
