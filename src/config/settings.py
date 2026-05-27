@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     minio_endpoint: str = "minio:9000"
     minio_root_user: str
     minio_root_password: str
+    # TLS toggle for the MinIO client. Default False for local docker-compose
+    # (HTTP). Set MINIO_SECURE=true in staging/prod environments where MinIO
+    # (or the upstream S3 service) is fronted by HTTPS.
+    minio_secure: bool = False
 
     # Nessie
     nessie_uri: str = "http://nessie:19120/api/v2"
