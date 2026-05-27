@@ -8,7 +8,7 @@ license = { text = "MIT" }
 authors = [{ name = "Gustavo La Torre" }]
 
 dependencies = [
-    "pyspark==3.5.2",
+    "pyspark==4.0.0",
     "pydantic-settings>=2.0",
     "minio>=7.2.0",
     "requests>=2.31.0",
@@ -24,7 +24,7 @@ dev = [
     "ruff>=0.4",
 ]
 airflow = [
-    "apache-airflow==2.11.0",
+    "apache-airflow==3.2.1",
     "apache-airflow-providers-apache-spark>=4.0",
 ]
 
@@ -45,7 +45,7 @@ select = [
     "SIM",  # flake8-simplify
     "TCH",  # flake8-type-checking
 ]
-ignore = ["E501"]
+ignore = ["E501", "N812"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
