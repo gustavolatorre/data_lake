@@ -1,0 +1,13 @@
+data_lake_gold:
+  target: dev
+  outputs:
+    dev:
+      type: dremio
+      software_host: dremio
+      port: 9047
+      use_ssl: false
+      user: "{{ env_var('DREMIO_ADMIN_USER') }}"
+      password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
+      space: "lakehouse"
+      schema: "gold"
+      datalake: "lakehouse"

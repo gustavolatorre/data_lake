@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: nessie_silver
+    database: lakehouse
+    schema: silver
+    tables:
+      - name: breweries
+        identifier: breweries

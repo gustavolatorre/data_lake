@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: stg_silver_breweries
+    description: "Staging model for Silver breweries data. Reads from lakehouse.silver.breweries source."
+    columns:
+      - name: id
+        description: "Unique identifier for the brewery (UUID / String)."
+        tests:
+          - unique
+          - not_null
+      - name: name
+        description: "Brewery name."
+        tests:
+          - not_null
+      - name: brewery_type
+        description: "Type of brewery (ex: micro, nano, regional, brewpub, large, planning, contract, proprietor, closed)."
+        tests:
+          - not_null
+      - name: address_1
+        description: "Primary street address."
+      - name: city
+        description: "City name."
+        tests:
+          - not_null
+      - name: state
+        description: "Cleaned and normalized state name (diacritics removed, sentinel values applied)."
+        tests:
+          - not_null
+      - name: country
+        description: "Country name."
+        tests:
+          - not_null
+      - name: is_active
+        description: "Soft delete flag. TRUE if active, FALSE if deleted from the source."
+        tests:
+          - not_null
+      - name: updated_at
+        description: "Timestamp of last modification in the Silver layer."
+      - name: ingestion_date
+        description: "Staging ingestion partition date (YYYY-MM-DD)."
