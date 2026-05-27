@@ -1,4 +1,4 @@
-FROM apache/spark:3.5.2
+FROM apache/spark:4.0.0
 
 USER root
 
@@ -23,19 +23,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PYSPARK_PYTHON=/usr/local/bin/python3.12
 ENV PYSPARK_DRIVER_PYTHON=/usr/local/bin/python3.12
 
-# Download Iceberg and AWS JARs for Spark
-ARG ICEBERG_VERSION=1.5.2
-ARG NESSIE_VERSION=0.79.0
-ARG HADOOP_AWS_VERSION=3.3.4
-ARG AWS_SDK_V1_VERSION=1.12.262
+# Download Iceberg and AWS JARs for Spark 4.0 (Scala 2.13) & AWS SDK v2
+ARG ICEBERG_VERSION=1.11.0
+ARG NESSIE_VERSION=0.107.5
+ARG HADOOP_AWS_VERSION=3.4.1
+ARG AWS_SDK_V2_VERSION=2.24.6
 
-RUN curl -fSL "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/${ICEBERG_VERSION}/iceberg-spark-runtime-3.5_2.12-${ICEBERG_VERSION}.jar" \
+RUN curl -fSL "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.0_2.13/${ICEBERG_VERSION}/iceberg-spark-runtime-4.0_2.13-${ICEBERG_VERSION}.jar" \
         -o /opt/spark/jars/iceberg-spark-runtime.jar && \
-    curl -fSL "https://repo1.maven.org/maven2/org/projectnessie/nessie-integrations/nessie-spark-extensions-3.5_2.12/${NESSIE_VERSION}/nessie-spark-extensions-3.5_2.12-${NESSIE_VERSION}.jar" \
-        -o /opt/spark/jars/nessie-spark-extensions.jar && \
     curl -fSL "https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" \
         -o /opt/spark/jars/hadoop-aws.jar && \
-    curl -fSL "https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_V1_VERSION}/aws-java-sdk-bundle-${AWS_SDK_V1_VERSION}.jar" \
+    curl -fSL "https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar" \
         -o /opt/spark/jars/aws-java-sdk-bundle.jar
 
 USER spark

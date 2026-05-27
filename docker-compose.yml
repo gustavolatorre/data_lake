@@ -3,9 +3,8 @@
 # ──────────────────────────────────────────────────────
 
 x-spark-common: &spark-common
-  build:
-    context: .
-    dockerfile: docker/Dockerfile.spark
+  image: data_lake-spark:latest
+  pull_policy: never
   volumes:
     - ./src:/opt/spark/src
     - ./jobs:/opt/spark/jobs
@@ -15,18 +14,20 @@ x-spark-common: &spark-common
     - lakehouse
 
 x-airflow-common: &airflow-common
-  build:
-    context: .
-    dockerfile: docker/Dockerfile.airflow
+  image: data_lake-airflow:latest
+  pull_policy: never
   env_file:
     - airflow.env
     - .env
+  environment:
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin,${AIRFLOW_USER}:admin
   volumes:
     - ./src:/opt/airflow/src
     - ./dags:/opt/airflow/dags
     - ./jobs:/opt/airflow/jobs
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    - ./dbt_project:/opt/airflow/dbt_project
   depends_on:
     postgres:
       condition: service_healthy
@@ -42,6 +43,9 @@ services:
   # ── Spark ──────────────────────────────────────────
   spark-master:
     <<: *spark-common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.spark
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     ports:
       - "9090:8080" # Spark UI
@@ -67,7 +71,7 @@ services:
 
   # ── Nessie (Iceberg REST Catalog) ─────────────────
   nessie:
-    image: ghcr.io/projectnessie/nessie:0.79.0
+    image: ghcr.io/projectnessie/nessie:0.107.5
     container_name: nessie
     ports:
       - "19120:19120"
@@ -86,15 +90,15 @@ services:
   postgres:
     image: postgres:14.0
     environment:
-      POSTGRES_USER: ${AIRFLOW_USER}
-      POSTGRES_PASSWORD: ${AIRFLOW_PASSWORD}
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
     volumes:
       - airflow-db-data:/var/lib/postgresql/data
     networks:
       - lakehouse
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${AIRFLOW_USER}" ]
+      test: [ "CMD-SHELL", "pg_isready -U airflow" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -103,7 +107,20 @@ services:
   # ── Airflow ───────────────────────────────────────
   scheduler:
     <<: *airflow-common
-    command: bash -c "airflow db migrate && airflow users create --username $${AIRFLOW_USER} --firstname Admin --lastname User --role Admin --email $${AIRFLOW_EMAIL} --password $${AIRFLOW_PASSWORD} || true && airflow scheduler"
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airflow
+    command: bash -c "python -c \"import os, json; print(json.dumps(dict([(os.getenv('AIRFLOW_USER','admin'),os.getenv('AIRFLOW_PASSWORD','airflow'))])))\" > /opt/airflow/simple_auth_passwords.json && airflow db migrate && airflow scheduler"
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nessie:
+        condition: service_healthy
+
+  dag-processor:
+    <<: *airflow-common
+    command: dag-processor
     restart: always
     depends_on:
       postgres:
@@ -113,7 +130,7 @@ services:
 
   webserver:
     <<: *airflow-common
-    command: webserver
+    command: bash -c "python -c \"import os, json; print(json.dumps(dict([(os.getenv('AIRFLOW_USER','admin'),os.getenv('AIRFLOW_PASSWORD','airflow'))])))\" > /opt/airflow/simple_auth_passwords.json && airflow api-server"
     restart: always
     ports:
       - "8080:8080" # Airflow UI
@@ -162,9 +179,7 @@ services:
           sleep 2;
         done;
         echo "Creating buckets...";
-        mc mb --ignore-existing local/bronze &&
-        mc mb --ignore-existing local/silver &&
-        mc mb --ignore-existing local/gold &&
+        mc mb --ignore-existing local/staging &&
         mc mb --ignore-existing local/warehouse &&
         echo "Buckets created successfully." &&
         exit 0;
