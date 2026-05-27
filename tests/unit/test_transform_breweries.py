@@ -45,12 +45,17 @@ class TestNormalizeUnicode:
 
     def test_handles_none(self, spark):
         """Should replace None with sentinel value __UNKNOWN__."""
-        from pyspark.sql import Row
+        from pyspark.sql.types import StringType, StructField, StructType
 
-        test_rows = [
-            Row(id="1", state=None, ingested_at="2026-05-23 12:00:00"),
-        ]
-        df = spark.createDataFrame(test_rows)
+        schema = StructType(
+            [
+                StructField("id", StringType(), True),
+                StructField("state", StringType(), True),
+                StructField("ingested_at", StringType(), True),
+            ]
+        )
+        test_rows = [("1", None, "2026-05-23 12:00:00")]
+        df = spark.createDataFrame(test_rows, schema=schema)
         transformed_df = _apply_native_transformations(df)
         results = {row.id: row.state for row in transformed_df.collect()}
 
