@@ -20,7 +20,8 @@ x-airflow-common: &airflow-common
     - airflow.env
     - .env
   environment:
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_USER}:${AIRFLOW_PASSWORD}"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_USER}:admin"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: "/opt/airflow/simple_auth_passwords.json"
   volumes:
     - ./src:/opt/airflow/src
     - ./dags:/opt/airflow/dags
@@ -149,7 +150,7 @@ services:
     depends_on:
       - scheduler
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/" ]
       interval: 30s
       timeout: 10s
       retries: 5
