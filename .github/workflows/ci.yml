@@ -18,10 +18,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dev dependencies
-        run: uv sync --extra dev
+        run: uv pip install -e ".[dev]"
 
       - name: Ruff lint
-        run: uv run ruff check src/ tests/ dags/
+        run: ruff check src/ tests/ dags/
 
   test:
     name: Test
@@ -40,7 +40,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dev dependencies
-        run: uv sync --extra dev
+        run: uv pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: uv run pytest --cov=src --cov-report=term-missing tests/
+        run: pytest --cov=src --cov-report=term-missing tests/
