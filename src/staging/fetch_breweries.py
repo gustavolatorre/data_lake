@@ -16,18 +16,18 @@ from src.utils.minio_client import create_minio_client, ensure_bucket_exists
 
 logger = logging.getLogger(__name__)
 
-BRONZE_BUCKET = "bronze"
+STAGING_BUCKET = "staging"
 
 
 def fetch_and_upload(execution_date: str) -> int:
-    """Fetch all brewery pages from the API and upload to MinIO bronze bucket.
+    """Fetch all brewery pages from the API and upload to MinIO staging bucket.
 
     Paginates through the OpenBreweryDB API, uploading each page as a separate
     JSON file. Stops when the API returns an empty list.
 
     Args:
         execution_date: Date string (YYYY-MM-DD) used for partitioning
-            files in the bronze bucket. Should come from Airflow's ``ds``.
+            files in the staging bucket. Should come from Airflow's ``ds``.
 
     Returns:
         Total number of records fetched across all pages.
@@ -39,7 +39,7 @@ def fetch_and_upload(execution_date: str) -> int:
     """
     settings = get_settings()
     client = create_minio_client()
-    ensure_bucket_exists(client, BRONZE_BUCKET)
+    ensure_bucket_exists(client, STAGING_BUCKET)
 
     total_records = 0
     page = 1
@@ -59,7 +59,7 @@ def fetch_and_upload(execution_date: str) -> int:
             break
 
         object_name = f"breweries/{execution_date}/breweries_page_{page}.json"
-        _upload_json(client, BRONZE_BUCKET, object_name, data)
+        _upload_json(client, STAGING_BUCKET, object_name, data)
 
         total_records += len(data)
         logger.info("Page %d uploaded (%d records) → %s", page, len(data), object_name)

@@ -1,85 +1,26 @@
-"""Silver layer — transform raw brewery JSON into a clean Iceberg table.
+"""Silver layer — transform Bronze Iceberg table into a clean Silver table.
 
-Reads raw JSON from the Bronze layer, applies data quality checks and
-transformations, and writes a partitioned Iceberg table to the Silver layer
-via the Nessie REST catalog.
-
-Transformations applied:
-    - Unicode normalization on ``state`` column (generic, not hardcoded)
-    - Null ``state`` values replaced with ``__UNKNOWN__``
-    - Schema validation against expected columns
-    - Deduplication by ``id`` (keep latest by ``ingestion_date``)
-    - Addition of ``ingestion_date`` column from Airflow execution date
+Reads from the Bronze Iceberg table, applies native Spark transformations,
+and performs an atomic MERGE into the Silver Iceberg table with Soft Delete
+logic to handle deletions at the source.
 """
 
 import logging
 import sys
-import unicodedata
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
-from src.config.settings import get_settings
-from src.utils.data_quality import check_null_counts, check_row_count, check_schema, log_quality_summary
 from src.utils.spark_session import create_spark_session
 
 logger = logging.getLogger(__name__)
-
-# Expected schema for raw brewery JSON
-BREWERY_SCHEMA = StructType(
-    [
-        StructField("id", StringType(), True),
-        StructField("name", StringType(), True),
-        StructField("brewery_type", StringType(), True),
-        StructField("address_1", StringType(), True),
-        StructField("address_2", StringType(), True),
-        StructField("address_3", StringType(), True),
-        StructField("city", StringType(), True),
-        StructField("state_province", StringType(), True),
-        StructField("postal_code", StringType(), True),
-        StructField("country", StringType(), True),
-        StructField("longitude", DoubleType(), True),
-        StructField("latitude", DoubleType(), True),
-        StructField("phone", StringType(), True),
-        StructField("website_url", StringType(), True),
-        StructField("state", StringType(), True),
-        StructField("street", StringType(), True),
-    ]
-)
-
-EXPECTED_COLUMNS = {field.name for field in BREWERY_SCHEMA.fields}
-
-CRITICAL_COLUMNS = ["id", "name", "brewery_type"]
-
-
-def normalize_unicode(text: str | None) -> str | None:
-    """Remove diacritical marks from a string using NFC → NFD decomposition.
-
-    Handles the API's encoding corruption (e.g., ``Kärnten`` → ``Karnten``)
-    generically rather than with hardcoded replacements.
-
-    Args:
-        text: Input string to normalize.
-
-    Returns:
-        Normalized string without diacritical marks, or None if input is None.
-    """
-    if text is None:
-        return None
-    normalized = unicodedata.normalize("NFD", text)
-    return "".join(c for c in normalized if unicodedata.category(c) != "Mn")
 
 
 def transform(execution_date: str) -> None:
     """Execute the Bronze → Silver transformation.
 
-    Reads raw JSON from MinIO, validates, cleans, and writes an Iceberg table
-    partitioned by ``state`` to the Nessie catalog.
-
     Args:
-        execution_date: Date string (YYYY-MM-DD) for the Bronze partition to read
-            and for the ``ingestion_date`` column value.
+        execution_date: Date string (YYYY-MM-DD) for the Bronze partition to process.
     """
     spark = create_spark_session("BreweriesBronzeToSilver")
 
@@ -97,86 +38,114 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
         spark: Active SparkSession.
         execution_date: Date string (YYYY-MM-DD).
     """
-    # Read Bronze JSON
-    bronze_path = f"s3a://bronze/breweries/{execution_date}/"
-    logger.info("Reading Bronze data from %s", bronze_path)
+    # 1. Read the latest snapshot from Bronze (filtered by execution_date)
+    logger.info("Reading Bronze data for ingestion_date=%s", execution_date)
 
-    df = spark.read.schema(BREWERY_SCHEMA).option("multiline", "true").json(bronze_path)
+    # We read the specific partition to ensure we are only processing the latest arrival
+    source_df = spark.table("nessie.bronze.breweries").filter(F.col("ingestion_date") == execution_date)
 
-    # Data quality checks
-    check_schema(df, EXPECTED_COLUMNS)
-    check_row_count(df, min_rows=1)
-    check_null_counts(df, CRITICAL_COLUMNS)
-    log_quality_summary(df, "bronze", CRITICAL_COLUMNS)
+    if source_df.isEmpty():
+        logger.warning("No data found in Bronze for date %s", execution_date)
+        return
 
-    # Apply transformations
-    df = _apply_transformations(df, execution_date, spark)
+    # 2. Apply transformations using native Spark functions (No UDFs!)
+    transformed_df = _apply_native_transformations(source_df)
 
-    # Write to Iceberg via Nessie catalog
-    _write_iceberg(spark, df)
+    # 3. Create a temporary view for the MERGE operation
+    transformed_df.createOrReplaceTempView("v_transformed_breweries")
+
+    # 4. Perform Atomic MERGE into Silver
+    _execute_merge(spark)
 
 
-def _apply_transformations(
-    df: DataFrame,
-    execution_date: str,
-    spark: SparkSession,
-) -> DataFrame:
-    """Apply all cleaning and enrichment transformations.
+def _apply_native_transformations(df: DataFrame) -> DataFrame:
+    """Apply cleaning using native Spark SQL functions.
 
     Args:
-        df: Raw Bronze DataFrame.
-        execution_date: Date string for the ingestion_date column.
-        spark: SparkSession (needed for UDF registration).
+        df: Input Bronze DataFrame.
 
     Returns:
-        Cleaned and enriched DataFrame ready for Silver write.
+        Transformed DataFrame.
     """
-    # Register UDF for unicode normalization
-    normalize_udf = F.udf(normalize_unicode, StringType())
+    # Unicode normalization (native translate instead of Python UDF)
+    # This covers common Portuguese/European accents
+    accents = "áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ"
+    clean = "aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC"
 
-    # Normalize state names (generic unicode handling)
-    df = df.withColumn("state", normalize_udf(F.col("state")))
+    df = df.withColumn("state", F.translate(F.col("state"), accents, clean))
 
-    # Replace null states with a sentinel value for clean partitioning
-    df = df.withColumn(
-        "state",
-        F.when(F.col("state").isNull(), F.lit("__UNKNOWN__")).otherwise(F.col("state")),
-    )
+    # Replace nulls with sentinel value for partitioning
+    df = df.withColumn("state", F.coalesce(F.col("state"), F.lit("__UNKNOWN__")))
 
-    # Add ingestion date (from Airflow execution_date for idempotency)
-    df = df.withColumn("ingestion_date", F.lit(execution_date))
-
-    # Deduplicate by id, keeping the latest record
+    # Deduplicate within the source snapshot (just in case)
+    # Using window function here is fine because it's on the source delta, not the target table
     from pyspark.sql.window import Window
 
-    window = Window.partitionBy("id").orderBy(F.col("ingestion_date").desc())
-    df = df.withColumn("_row_num", F.row_number().over(window)).filter(F.col("_row_num") == 1).drop("_row_num")
+    window = Window.partitionBy("id").orderBy(F.col("ingested_at").desc())
 
-    record_count = df.count()
-    logger.info("Transformation complete: %d records after dedup and cleaning", record_count)
+    df = df.withColumn("_rn", F.row_number().over(window)).filter(F.col("_rn") == 1).drop("_rn")
 
     return df
 
 
-def _write_iceberg(spark: SparkSession, df: DataFrame) -> None:
-    """Write the transformed DataFrame as an Iceberg table in Nessie catalog.
+def _execute_merge(spark: SparkSession) -> None:
+    """Execute Iceberg MERGE INTO with Soft Delete logic.
 
-    Creates the ``nessie.silver`` namespace if it doesn't exist, then writes
-    the table with ``createOrReplace`` for idempotent execution.
-
-    Args:
-        spark: Active SparkSession.
-        df: Transformed DataFrame to write.
+    Logic:
+    - Match by ID: Update attributes and set is_active = true.
+    - Not Matched by Source: Update is_active = false (Deletions).
+    - Not Matched: Insert as new record with is_active = true.
     """
-    logger.info("Writing Silver Iceberg table to Nessie catalog")
+    logger.info("Executing MERGE INTO nessie.silver.breweries")
 
     spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.silver")
 
-    df.writeTo("nessie.silver.breweries").tableProperty("format-version", "2").partitionedBy(
-        F.col("state")
-    ).createOrReplace()
+    # Ensure target table exists with correct schema before MERGE
+    # In a real scenario, this would be handled by a migration or DDL script
+    if not spark.catalog.tableExists("nessie.silver.breweries"):
+        logger.info("Creating Silver table for the first time")
+        spark.sql("""
+            CREATE TABLE IF NOT EXISTS nessie.silver.breweries (
+                id STRING,
+                name STRING,
+                brewery_type STRING,
+                address_1 STRING,
+                city STRING,
+                state STRING,
+                country STRING,
+                is_active BOOLEAN,
+                updated_at TIMESTAMP,
+                ingestion_date STRING
+            )
+            USING iceberg
+            PARTITIONED BY (state)
+            TBLPROPERTIES ('format-version'='2')
+        """)
 
-    logger.info("Silver Iceberg table written successfully: nessie.silver.breweries")
+    spark.sql("""
+        MERGE INTO nessie.silver.breweries t
+        USING v_transformed_breweries s
+        ON t.id = s.id
+        WHEN MATCHED THEN
+            UPDATE SET
+                t.name = s.name,
+                t.brewery_type = s.brewery_type,
+                t.address_1 = s.address_1,
+                t.city = s.city,
+                t.state = s.state,
+                t.country = s.country,
+                t.is_active = true,
+                t.updated_at = current_timestamp()
+        WHEN NOT MATCHED THEN
+            INSERT (id, name, brewery_type, address_1, city, state, country, is_active, updated_at, ingestion_date)
+            VALUES (s.id, s.name, s.brewery_type, s.address_1, s.city, s.state, s.country, true, current_timestamp(), s.ingestion_date)
+        WHEN NOT MATCHED BY SOURCE THEN
+            UPDATE SET
+                t.is_active = false,
+                t.updated_at = current_timestamp()
+    """)
+
+    logger.info("Silver MERGE complete")
 
 
 if __name__ == "__main__":
