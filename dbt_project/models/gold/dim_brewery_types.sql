@@ -5,6 +5,6 @@ with unique_types as (
 )
 
 select
-    md5(upper(trim(brewery_type))) as brewery_type_key,
+    {{ surrogate_key(['brewery_type']) }} as brewery_type_key,
     brewery_type
 from unique_types

@@ -55,4 +55,5 @@ def get_settings() -> Settings:
     Returns:
         Settings: Application configuration object.
     """
-    return Settings()
+    # pydantic-settings populates required fields from env vars / .env at runtime
+    return Settings()  # type: ignore[call-arg]

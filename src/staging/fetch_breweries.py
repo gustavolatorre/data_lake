@@ -90,7 +90,7 @@ def _fetch_page(
         requests.exceptions.Timeout: On request timeout.
         ValueError: If response is not a JSON list.
     """
-    params = {"page": page, "per_page": per_page, "sort": "name,asc"}
+    params: dict[str, str | int] = {"page": page, "per_page": per_page, "sort": "name,asc"}
 
     response = requests.get(base_url, params=params, timeout=timeout)
     response.raise_for_status()

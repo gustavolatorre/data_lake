@@ -34,6 +34,9 @@ models:
         description: "Brewery type name (ex: micro, nano, regional, brewpub, planning, etc.)."
         tests:
           - not_null
+          - relationships:
+              to: ref('brewery_type_mapping')
+              field: brewery_type
 
   - name: fact_breweries
     description: "Central Fact table for breweries. Materialized incrementally with merge strategy."
