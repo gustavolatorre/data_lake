@@ -1,6 +1,5 @@
 # Data Lakehouse Engineering Manual (v3.1.0)
 
-> **Technical Authority:** Antigravity Data Platform Specialist  
 > **Core Stack:** Airflow 3.2.1 | Spark 4.0.0 | Apache Iceberg 1.11.0 | Project Nessie 0.107.5 | dbt Core 1.8.x | Dremio
 
 ---
