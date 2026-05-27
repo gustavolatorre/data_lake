@@ -2,8 +2,31 @@ version: 2
 
 sources:
   - name: nessie_silver
+    description: >
+      Silver-layer Iceberg tables exposed to Dremio via the Nessie catalog
+      (registered as the "lakehouse" source).
     database: lakehouse
     schema: silver
     tables:
       - name: breweries
         identifier: breweries
+        description: >
+          Cleaned, deduplicated, soft-delete-aware brewery records produced
+          by the Bronze → Silver MERGE pipeline.
+        loaded_at_field: updated_at
+        # Pipeline runs daily. We expect Silver to be at most 25h stale before
+        # warning, and we treat >49h as a hard error (means the Bronze/Silver
+        # DAG has failed two days in a row).
+        freshness:
+          warn_after: { count: 25, period: hour }
+          error_after: { count: 49, period: hour }
+        columns:
+          - name: id
+            description: Business key from the OpenBreweryDB API.
+            tests:
+              - unique
+              - not_null
+          - name: updated_at
+            description: Last modification timestamp set by the Silver MERGE.
+            tests:
+              - not_null

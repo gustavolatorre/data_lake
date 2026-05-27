@@ -5,10 +5,16 @@ USER root
 # Build Python 3.12 from source to match the Airflow driver (Python 3.12).
 # The base image is Ubuntu 20.04 (GLIBC 2.31), so we cannot copy binaries
 # from newer Debian-based images. Compiling from source ensures ABI compat.
+ARG PYTHON_VERSION=3.12.4
+ARG PYTHON_SHA256=01b3c1c082196f3b33168d344a9c85fb07bfe0e7ecfe77fee4443420d1ce2ad9
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl build-essential zlib1g-dev libssl-dev libffi-dev \
     libbz2-dev libreadline-dev libsqlite3-dev liblzma-dev && \
-    curl -fSL https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz | tar xz && \
+    curl -fSL "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz" \
+        -o "Python-${PYTHON_VERSION}.tgz" && \
+    echo "${PYTHON_SHA256}  Python-${PYTHON_VERSION}.tgz" | sha256sum -c - && \
+    tar xzf "Python-${PYTHON_VERSION}.tgz" && \
+    rm "Python-${PYTHON_VERSION}.tgz" && \
     cd Python-3.12.4 && \
     ./configure --enable-optimizations --prefix=/usr/local && \
     make -j$(nproc) && make install && \

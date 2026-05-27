@@ -21,9 +21,15 @@ RUN pip install --no-cache-dir \
     minio>=7.2.0 \
     requests>=2.31.0 \
     python-dotenv>=1.0.0 \
+    bcrypt>=4.0 \
     apache-airflow-providers-apache-spark>=4.0 \
     pyspark==4.0.0 \
     dbt-dremio
+
+# Helper script that writes the bcrypt-hashed Simple Auth Manager passwords
+# file at container startup. Copied (not bind-mounted) so the path is stable
+# inside the image regardless of the host layout.
+COPY --chown=airflow:0 docker/airflow/generate_auth_file.py /opt/airflow/scripts/generate_auth_file.py
 
 # Download Iceberg + Hadoop-AWS + AWS SDK v2 JARs into PySpark's jars directory
 # so the driver (running in this container) has them on the system classpath.

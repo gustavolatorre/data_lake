@@ -5,6 +5,8 @@ This module provides a single source of truth for all service endpoints,
 credentials, and tunable parameters across the application.
 """
 
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -53,8 +55,9 @@ class Settings(BaseSettings):
     api_timeout_seconds: int = 15
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return a cached Settings instance.
+    """Return a cached Settings instance (one per process).
 
     Returns:
         Settings: Application configuration object.

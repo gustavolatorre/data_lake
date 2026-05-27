@@ -9,6 +9,7 @@ from datetime import timedelta
 
 import pendulum
 from airflow.sdk import Asset, dag, task
+from callbacks import build_failure_callback
 
 logger = logging.getLogger("airflow.task")
 
@@ -17,22 +18,7 @@ local_tz = pendulum.timezone("America/Sao_Paulo")
 # Definindo o Asset reativo de saída
 staging_breweries_raw = Asset("s3://staging/breweries")
 
-
-def on_failure_callback(context: dict) -> None:
-    """Log detailed failure information when a task fails."""
-    task_instance = context.get("task_instance")
-    dag_id = context.get("dag").dag_id if context.get("dag") else "unknown"
-    task_id = task_instance.task_id if task_instance else "unknown"
-    execution_date = context.get("ds", "unknown")
-    exception = context.get("exception", "No exception info")
-
-    logger.error(
-        "STAGE INGESTION FAILURE | dag=%s | task=%s | date=%s | error=%s",
-        dag_id,
-        task_id,
-        execution_date,
-        exception,
-    )
+on_failure_callback = build_failure_callback("STAGING INGESTION")
 
 
 @dag(
