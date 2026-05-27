@@ -1,6 +1,18 @@
 """Unit tests for Silver layer — brewery transformations."""
 
-from src.silver.transform_breweries import _apply_native_transformations
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.silver.transform_breweries import (
+    MAX_SOURCE_SHRINK_RATIO,
+    SourceShrinkError,
+    _apply_native_transformations,
+    _assert_source_not_shrinking,
+    _execute_merge,
+    _run_transform,
+    transform,
+)
 
 
 class TestNormalizeUnicode:
@@ -144,3 +156,159 @@ class TestSilverTransformations:
             "street",
         }
         assert set(sample_df.columns) == expected
+
+
+class TestExecuteMerge:
+    """Tests for the Silver MERGE INTO orchestration."""
+
+    def test_creates_namespace(self):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+
+        _execute_merge(spark)
+
+        spark.sql.assert_any_call("CREATE NAMESPACE IF NOT EXISTS nessie.silver")
+
+    def test_creates_table_on_first_run(self):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = False
+
+        _execute_merge(spark)
+
+        ddl_calls = [args[0] for args, _ in spark.sql.call_args_list]
+        create_table = next((c for c in ddl_calls if "CREATE TABLE" in c), None)
+        assert create_table is not None, "first-run path must CREATE TABLE"
+        assert "format-version" in create_table
+        assert "'3'" in create_table
+
+    def test_skips_create_when_table_exists(self):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+
+        _execute_merge(spark)
+
+        ddl_calls = [args[0] for args, _ in spark.sql.call_args_list]
+        assert not any("CREATE TABLE" in c for c in ddl_calls), (
+            "should not CREATE TABLE when it already exists"
+        )
+
+    def test_issues_merge_with_soft_delete_clauses(self):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+
+        _execute_merge(spark)
+
+        ddl_calls = [args[0] for args, _ in spark.sql.call_args_list]
+        merge_sql = next((c for c in ddl_calls if "MERGE INTO" in c), None)
+        assert merge_sql is not None, "MERGE must be issued"
+        assert "WHEN MATCHED" in merge_sql
+        assert "WHEN NOT MATCHED" in merge_sql
+        assert "WHEN NOT MATCHED BY SOURCE" in merge_sql
+        assert "is_active = false" in merge_sql
+        assert "is_active = true" in merge_sql
+
+
+class TestSourceShrinkGuard:
+    """Tests for the relative shrink guard added in P1.17."""
+
+    def _spark_with_active_count(self, active_count: int):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+        result_row = MagicMock()
+        result_row.__getitem__.side_effect = lambda key: active_count if key == "c" else None
+        spark.sql.return_value.collect.return_value = [result_row]
+        return spark
+
+    def _df_with_count(self, count: int):
+        df = MagicMock()
+        df.count.return_value = count
+        return df
+
+    def test_aborts_when_drop_exceeds_threshold(self):
+        spark = self._spark_with_active_count(active_count=1000)
+        # 50% drop is well past the 20% threshold
+        df = self._df_with_count(500)
+
+        with pytest.raises(SourceShrinkError, match="dropped"):
+            _assert_source_not_shrinking(spark, df)
+
+    def test_passes_when_drop_below_threshold(self):
+        spark = self._spark_with_active_count(active_count=1000)
+        # 10% drop — below the 20% threshold
+        df = self._df_with_count(900)
+
+        _assert_source_not_shrinking(spark, df)  # must not raise
+
+    def test_passes_when_source_grows(self):
+        spark = self._spark_with_active_count(active_count=1000)
+        df = self._df_with_count(1200)
+
+        _assert_source_not_shrinking(spark, df)
+
+    def test_skips_when_silver_table_missing(self):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = False
+        df = self._df_with_count(0)
+
+        _assert_source_not_shrinking(spark, df)
+
+        # spark.sql must NOT be queried for active count when table is absent
+        spark.sql.assert_not_called()
+
+    def test_skips_when_silver_has_zero_active_rows(self):
+        spark = self._spark_with_active_count(active_count=0)
+        df = self._df_with_count(0)
+
+        # No raise, even though both are 0. First-population case.
+        _assert_source_not_shrinking(spark, df)
+
+    def test_threshold_constant_is_20_percent(self):
+        """Locks in the agreed-on default so accidental changes are caught."""
+        assert MAX_SOURCE_SHRINK_RATIO == 0.20
+
+
+class TestTransformEntrypoint:
+    """Tests for the top-level transform() function."""
+
+    @patch("src.silver.transform_breweries._run_transform")
+    @patch("src.silver.transform_breweries.create_spark_session")
+    def test_stops_spark_on_failure(self, mock_create, mock_run):
+        mock_spark = MagicMock()
+        mock_create.return_value = mock_spark
+        mock_run.side_effect = RuntimeError("kaboom")
+
+        with pytest.raises(RuntimeError, match="kaboom"):
+            transform("2026-04-29")
+
+        mock_spark.stop.assert_called_once()
+
+    @patch("src.silver.transform_breweries._run_transform")
+    @patch("src.silver.transform_breweries.create_spark_session")
+    def test_happy_path(self, mock_create, mock_run):
+        mock_spark = MagicMock()
+        mock_create.return_value = mock_spark
+
+        transform("2026-04-29")
+
+        mock_run.assert_called_once_with(mock_spark, "2026-04-29")
+        mock_spark.stop.assert_called_once()
+
+
+class TestRunTransformEmptySource:
+    """If the Bronze partition is empty, _run_transform returns early."""
+
+    @patch("src.silver.transform_breweries.F")
+    def test_empty_source_returns_without_merge(self, _mock_F):
+        """Empty Bronze for the date short-circuits — no MERGE issued."""
+        spark = MagicMock()
+        bronze_df = MagicMock()
+        bronze_df.isEmpty.return_value = True
+        spark.table.return_value.filter.return_value = bronze_df
+
+        _run_transform(spark, "2026-04-29")
+
+        # No MERGE was issued
+        merge_calls = [
+            args[0] for args, _ in spark.sql.call_args_list if "MERGE" in str(args[0])
+        ]
+        assert merge_calls == []

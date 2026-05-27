@@ -16,6 +16,16 @@ from src.utils.spark_session import create_spark_session
 
 logger = logging.getLogger(__name__)
 
+# Guard rail: abort the MERGE if today's snapshot is more than this much smaller
+# than the previous active count. Protects against a partial fetch (e.g. network
+# instability dropping pagination mid-run) silently soft-deleting half the
+# Silver table via WHEN NOT MATCHED BY SOURCE.
+MAX_SOURCE_SHRINK_RATIO = 0.20  # 20% drop = abort
+
+
+class SourceShrinkError(RuntimeError):
+    """Raised when today's source count is suspiciously smaller than yesterday's."""
+
 
 def transform(execution_date: str) -> None:
     """Execute the Bronze → Silver transformation.
@@ -66,11 +76,67 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
         critical_columns=["id", "name", "brewery_type", "city", "state", "country"],
     )
 
-    # 3. Create a temporary view for the MERGE operation
+    # 3. Guard rail — protect against partial fetch silently soft-deleting rows
+    _assert_source_not_shrinking(spark, transformed_df)
+
+    # 4. Create a temporary view for the MERGE operation
     transformed_df.createOrReplaceTempView("v_transformed_breweries")
 
-    # 4. Perform Atomic MERGE into Silver
+    # 5. Perform Atomic MERGE into Silver
     _execute_merge(spark)
+
+
+def _assert_source_not_shrinking(spark: SparkSession, source_df: DataFrame) -> None:
+    """Abort the run if today's source is much smaller than yesterday's Silver.
+
+    Compares the row count of ``source_df`` to the count of currently-active
+    rows in ``nessie.silver.breweries``. A drop greater than
+    ``MAX_SOURCE_SHRINK_RATIO`` aborts the MERGE — the most likely cause is a
+    partial API fetch (pagination interrupted), and a global soft-delete via
+    ``WHEN NOT MATCHED BY SOURCE`` would deactivate the missing rows
+    incorrectly.
+
+    Skips the check when the Silver table does not exist yet (first run) or
+    has zero active rows — there's nothing to lose.
+
+    Args:
+        spark: Active SparkSession.
+        source_df: The (already-transformed) source DataFrame about to be
+            MERGE'd into Silver.
+
+    Raises:
+        SourceShrinkError: When today's source has shrunk past the threshold.
+    """
+    if not spark.catalog.tableExists("nessie.silver.breweries"):
+        logger.info("Silver table does not exist yet — skipping shrink guard")
+        return
+
+    prev_active = spark.sql(
+        "SELECT COUNT(*) AS c FROM nessie.silver.breweries WHERE is_active = true"
+    ).collect()[0]["c"]
+    if prev_active == 0:
+        logger.info("Silver table has 0 active rows — skipping shrink guard")
+        return
+
+    curr_count = source_df.count()
+    threshold = int(prev_active * (1 - MAX_SOURCE_SHRINK_RATIO))
+
+    if curr_count < threshold:
+        msg = (
+            f"Source row count dropped > {MAX_SOURCE_SHRINK_RATIO:.0%}: "
+            f"previous active={prev_active}, current source={curr_count}. "
+            f"Aborting MERGE to prevent mass false-positive soft-deletes "
+            f"(suspect: partial API fetch)."
+        )
+        logger.error(msg)
+        raise SourceShrinkError(msg)
+
+    logger.info(
+        "Shrink guard OK: previous active=%d, current source=%d (threshold=%d)",
+        prev_active,
+        curr_count,
+        threshold,
+    )
 
 
 def _apply_native_transformations(df: DataFrame) -> DataFrame:
@@ -134,7 +200,7 @@ def _execute_merge(spark: SparkSession) -> None:
             )
             USING iceberg
             PARTITIONED BY (state)
-            TBLPROPERTIES ('format-version'='2')
+            TBLPROPERTIES ('format-version'='3')
         """)
 
     spark.sql("""

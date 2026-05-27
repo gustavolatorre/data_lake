@@ -17,6 +17,22 @@ models:
         description: "Type of brewery (ex: micro, nano, regional, brewpub, large, planning, contract, proprietor, closed)."
         tests:
           - not_null
+          - accepted_values:
+              # Mirrors dbt_project/seeds/brewery_type_mapping.csv — blocks
+              # unknown types from reaching Gold via dim_brewery_types.
+              values:
+                - micro
+                - nano
+                - regional
+                - brewpub
+                - large
+                - planning
+                - contract
+                - proprietor
+                - closed
+                - taproom
+              config:
+                severity: error
       - name: address_1
         description: "Primary street address."
       - name: city

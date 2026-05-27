@@ -10,6 +10,8 @@ import json
 import logging
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from src.config.settings import get_settings
 from src.utils.minio_client import create_minio_client, ensure_bucket_exists
@@ -17,6 +19,27 @@ from src.utils.minio_client import create_minio_client, ensure_bucket_exists
 logger = logging.getLogger(__name__)
 
 STAGING_BUCKET = "staging"
+
+# Retry policy for the OpenBreweryDB API: 3 attempts with exponential backoff
+# (1s, 2s, 4s) on transient errors. Applied per-request — does NOT replay the
+# entire pagination loop. Airflow still owns task-level retries (3x) for
+# anything this doesn't recover.
+_RETRY_POLICY = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+    raise_on_status=False,
+)
+
+
+def _build_session() -> requests.Session:
+    """Build a requests.Session with the standard retry policy mounted."""
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=_RETRY_POLICY)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 def fetch_and_upload(execution_date: str) -> int:
@@ -40,6 +63,7 @@ def fetch_and_upload(execution_date: str) -> int:
     settings = get_settings()
     client = create_minio_client()
     ensure_bucket_exists(client, STAGING_BUCKET)
+    http_session = _build_session()
 
     total_records = 0
     page = 1
@@ -48,6 +72,7 @@ def fetch_and_upload(execution_date: str) -> int:
 
     while True:
         data = _fetch_page(
+            session=http_session,
             base_url=settings.api_base_url,
             page=page,
             per_page=settings.api_per_page,
@@ -69,6 +94,7 @@ def fetch_and_upload(execution_date: str) -> int:
 
 
 def _fetch_page(
+    session: requests.Session,
     base_url: str,
     page: int,
     per_page: int,
@@ -77,6 +103,7 @@ def _fetch_page(
     """Fetch a single page from the OpenBreweryDB API.
 
     Args:
+        session: Pre-configured requests.Session with retry policy.
         base_url: API base URL.
         page: Page number to fetch.
         per_page: Number of records per page.
@@ -92,7 +119,7 @@ def _fetch_page(
     """
     params: dict[str, str | int] = {"page": page, "per_page": per_page, "sort": "name,asc"}
 
-    response = requests.get(base_url, params=params, timeout=timeout)
+    response = session.get(base_url, params=params, timeout=timeout)
     response.raise_for_status()
 
     data = response.json()

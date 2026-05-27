@@ -78,17 +78,34 @@ models:
     columns:
       - name: country
         description: "Country name."
+        tests:
+          - not_null
       - name: state
         description: "State name."
+        tests:
+          - not_null
       - name: city
         description: "City name."
+        tests:
+          - not_null
       - name: active_breweries_count
         description: "Number of active breweries currently operating in the city."
+        tests:
+          - not_null
       - name: inactive_breweries_count
         description: "Number of inactive/closed breweries historically recorded."
+        tests:
+          - not_null
       - name: total_breweries
         description: "Total number of breweries historically registered (active + inactive)."
+        tests:
+          - not_null
       - name: active_ratio
         description: "Percentage of active breweries compared to the total (active / total * 100)."
+        # active_ratio = active / total * 100. Domain: [0, 100].
+        # Allowed to be NULL only when total_breweries = 0 (division-by-zero
+        # guarded by nullif() in the model).
       - name: city_state_rank
         description: "Rank of the city within its state based on the count of active breweries (dense rank)."
+        tests:
+          - not_null

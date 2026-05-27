@@ -135,12 +135,21 @@ class TestDagStructure:
 
 
 class TestFailureCallbacks:
-    """Every DAG should define an on_failure_callback for observability."""
+    """Every DAG should wire up an on_failure_callback for observability."""
 
     @pytest.mark.parametrize("filename", list(EXPECTED_DAGS.keys()))
-    def test_defines_failure_callback(self, filename):
+    def test_wires_failure_callback(self, filename):
+        """Each DAG must bind ``on_failure_callback`` — either as a local function
+        or as an assignment (e.g. ``on_failure_callback = build_failure_callback(...)``).
+        """
         tree = _parse(filename)
         func_names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-        assert "on_failure_callback" in func_names, (
-            f"{filename} does not define on_failure_callback"
+        assigned_names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assigned_names.add(target.id)
+        assert "on_failure_callback" in (func_names | assigned_names), (
+            f"{filename} does not bind on_failure_callback"
         )

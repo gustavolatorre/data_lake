@@ -47,9 +47,14 @@ services:
       context: .
       dockerfile: docker/Dockerfile.spark
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    # SECURITY: port 7077 (job submission) is NOT bound to host — Spark Master
+    # has no authentication, and binding it would let any local process submit
+    # jobs that execute code with access to ./src and ./jobs volumes.
+    # Airflow submits via the internal Docker network (conn_id=spark_docker).
     ports:
       - "9090:8080" # Spark UI
-      - "7077:7077" # Spark master port
+    expose:
+      - "7077" # Spark master port (intra-network only)
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
       interval: 30s
@@ -117,7 +122,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.airflow
-    command: bash -c "python -c \"import os, json; print(json.dumps(dict([(os.getenv('AIRFLOW_USER','admin'),os.getenv('AIRFLOW_PASSWORD','airflow'))])))\" > /opt/airflow/simple_auth_passwords.json && airflow db migrate && airflow scheduler"
+    command: bash -c "python /opt/airflow/scripts/generate_auth_file.py && airflow db migrate && airflow scheduler"
     restart: always
     depends_on:
       postgres:
@@ -137,7 +142,7 @@ services:
 
   webserver:
     <<: *airflow-common
-    command: bash -c "python -c \"import os, json; print(json.dumps(dict([(os.getenv('AIRFLOW_USER','admin'),os.getenv('AIRFLOW_PASSWORD','airflow'))])))\" > /opt/airflow/simple_auth_passwords.json && airflow api-server"
+    command: bash -c "python /opt/airflow/scripts/generate_auth_file.py && airflow api-server"
     restart: always
     ports:
       - "8080:8080" # Airflow UI

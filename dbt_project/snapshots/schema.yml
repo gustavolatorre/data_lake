@@ -1,0 +1,21 @@
+version: 2
+
+snapshots:
+  - name: snap_breweries
+    description: >
+      Point-in-time SCD2 snapshot of the Silver breweries table. dbt manages
+      ``dbt_valid_from`` / ``dbt_valid_to`` so any row's composite PK
+      ``(id, dbt_valid_from)`` must be unique.
+    columns:
+      - name: id
+        description: Business identifier carried over from Silver.
+        tests:
+          - not_null
+      - name: dbt_valid_from
+        description: Timestamp this snapshot row became the current truth.
+        tests:
+          - not_null
+      - name: dbt_valid_to
+        description: >
+          NULL while this row is the current version; populated when a newer
+          version supersedes it.

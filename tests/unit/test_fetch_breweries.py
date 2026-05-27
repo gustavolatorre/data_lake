@@ -3,9 +3,10 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 import responses
 
-from src.staging.fetch_breweries import _fetch_page, _upload_json, fetch_and_upload
+from src.staging.fetch_breweries import _build_session, _fetch_page, _upload_json, fetch_and_upload
 
 
 class TestFetchPage:
@@ -23,6 +24,7 @@ class TestFetchPage:
         )
 
         result = _fetch_page(
+            session=requests.Session(),
             base_url="https://api.openbrewerydb.org/v1/breweries",
             page=1,
             per_page=50,
@@ -43,6 +45,7 @@ class TestFetchPage:
         )
 
         result = _fetch_page(
+            session=requests.Session(),
             base_url="https://api.openbrewerydb.org/v1/breweries",
             page=999,
             per_page=50,
@@ -63,6 +66,7 @@ class TestFetchPage:
 
         with pytest.raises(ValueError, match="expected list"):
             _fetch_page(
+                session=requests.Session(),
                 base_url="https://api.openbrewerydb.org/v1/breweries",
                 page=1,
                 per_page=50,
@@ -71,7 +75,13 @@ class TestFetchPage:
 
     @responses.activate
     def test_fetch_page_http_error_raises(self):
-        """Should raise HTTPError on non-2xx status."""
+        """Should raise HTTPError on a non-2xx status.
+
+        ``responses`` short-circuits urllib3's Retry adapter, so retries are
+        not exercised at unit-test layer — that path is covered by the
+        ``test_build_session_*`` tests which inspect adapter configuration.
+        Here we just confirm raise_for_status() lights up.
+        """
         responses.add(
             responses.GET,
             "https://api.openbrewerydb.org/v1/breweries",
@@ -79,15 +89,35 @@ class TestFetchPage:
             status=500,
         )
 
-        import requests
-
         with pytest.raises(requests.exceptions.HTTPError):
             _fetch_page(
+                session=_build_session(),
                 base_url="https://api.openbrewerydb.org/v1/breweries",
                 page=1,
                 per_page=50,
                 timeout=10,
             )
+
+
+class TestBuildSession:
+    """The Session must mount the retry adapter for both http and https."""
+
+    def test_mounts_retry_adapter_for_https(self):
+        session = _build_session()
+        adapter = session.get_adapter("https://api.openbrewerydb.org")
+        # Adapter is a HTTPAdapter — the Retry policy lives on max_retries
+        retry = adapter.max_retries
+        assert retry.total == 3
+        assert 429 in retry.status_forcelist
+        assert 500 in retry.status_forcelist
+        assert 502 in retry.status_forcelist
+        assert 503 in retry.status_forcelist
+        assert 504 in retry.status_forcelist
+
+    def test_mounts_retry_adapter_for_http(self):
+        session = _build_session()
+        adapter = session.get_adapter("http://example.com")
+        assert adapter.max_retries.total == 3
 
 
 class TestUploadJson:

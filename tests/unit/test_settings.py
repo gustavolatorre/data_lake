@@ -1,0 +1,94 @@
+"""Unit tests for ``src.config.settings``.
+
+These tests isolate Settings from the project ``.env`` by chdir'ing to an
+empty tmp directory before instantiation. ``env_file=".env"`` is therefore a
+no-op and only the test's monkeypatched environment variables are read.
+"""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from src.config import settings as settings_module
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache():
+    """Reset the lru_cache between tests so env tweaks land."""
+    settings_module.get_settings.cache_clear()
+    yield
+    settings_module.get_settings.cache_clear()
+
+
+@pytest.fixture
+def clean_env(monkeypatch, tmp_path):
+    """chdir to an empty dir + set the bare-minimum required env vars."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MINIO_ROOT_USER", "test-user")
+    monkeypatch.setenv("MINIO_ROOT_PASSWORD", "test-pass-strong-enough")
+    # Clean any optional vars that other tests might have leaked
+    for var in (
+        "MINIO_SECURE",
+        "MINIO_ENDPOINT",
+        "NESSIE_URI",
+        "SPARK_MASTER",
+        "SPARK_DRIVER_MEMORY",
+        "SPARK_EXECUTOR_MEMORY",
+        "API_BASE_URL",
+        "API_PER_PAGE",
+        "API_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+class TestSettingsLoading:
+    def test_loads_required_env_vars(self, clean_env):
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.minio_root_user == "test-user"
+        assert s.minio_root_password == "test-pass-strong-enough"
+
+    def test_fails_when_required_missing(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("MINIO_ROOT_USER", raising=False)
+        monkeypatch.delenv("MINIO_ROOT_PASSWORD", raising=False)
+        with pytest.raises(ValidationError):
+            settings_module.Settings()  # type: ignore[call-arg]
+
+    def test_default_minio_secure_is_false(self, clean_env):
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.minio_secure is False
+
+    def test_minio_secure_can_be_overridden(self, clean_env, monkeypatch):
+        monkeypatch.setenv("MINIO_SECURE", "true")
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.minio_secure is True
+
+    def test_default_nessie_uri(self, clean_env):
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.nessie_uri == "http://nessie:19120/api/v2"
+
+    def test_default_api_settings(self, clean_env):
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.api_base_url == "https://api.openbrewerydb.org/v1/breweries"
+        assert s.api_per_page == 50
+        assert s.api_timeout_seconds == 15
+
+    def test_default_spark_resources(self, clean_env):
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.spark_master == "spark://spark-master:7077"
+        assert s.spark_driver_memory == "2g"
+        assert s.spark_executor_memory == "2g"
+
+
+class TestGetSettingsCache:
+    def test_returns_cached_instance(self, clean_env):
+        first = settings_module.get_settings()
+        second = settings_module.get_settings()
+        assert first is second, "get_settings must return the same cached object"
+
+    def test_cache_can_be_cleared(self, clean_env):
+        first = settings_module.get_settings()
+        settings_module.get_settings.cache_clear()
+        second = settings_module.get_settings()
+        assert first is not second, "after cache_clear, get_settings must return a fresh object"
