@@ -11,6 +11,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
+from src.utils.data_quality import check_row_count, log_quality_summary
 from src.utils.spark_session import create_spark_session
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,10 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
     # Add ingestion metadata
     df = df.withColumn("ingestion_date", F.lit(execution_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
+
+    # Validate before writing — fail fast if staging produced no data
+    check_row_count(df, min_rows=1)
+    log_quality_summary(df, "bronze", critical_columns=["id", "name", "brewery_type"])
 
     # Write to Iceberg Bronze (Append Only)
     table_name = "nessie.bronze.breweries"

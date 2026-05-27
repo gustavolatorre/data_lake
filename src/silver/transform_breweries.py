@@ -11,6 +11,7 @@ import sys
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from src.utils.data_quality import check_null_counts, log_quality_summary
 from src.utils.spark_session import create_spark_session
 
 logger = logging.getLogger(__name__)
@@ -48,8 +49,22 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
         logger.warning("No data found in Bronze for date %s", execution_date)
         return
 
+    log_quality_summary(
+        source_df,
+        "bronze",
+        critical_columns=["id", "name", "brewery_type", "city", "state", "country"],
+    )
+
     # 2. Apply transformations using native Spark functions (No UDFs!)
     transformed_df = _apply_native_transformations(source_df)
+
+    # Ensure id was never nullified by transformations before writing to Silver
+    check_null_counts(transformed_df, ["id"], fail_on_nulls=True)
+    log_quality_summary(
+        transformed_df,
+        "silver",
+        critical_columns=["id", "name", "brewery_type", "city", "state", "country"],
+    )
 
     # 3. Create a temporary view for the MERGE operation
     transformed_df.createOrReplaceTempView("v_transformed_breweries")
