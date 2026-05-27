@@ -298,7 +298,7 @@ class TestRunTransformEmptySource:
     """If the Bronze partition is empty, _run_transform returns early."""
 
     @patch("src.silver.transform_breweries.F")
-    def test_empty_source_returns_without_merge(self, _mock_F):
+    def test_empty_source_returns_without_merge(self, _mock_f):
         """Empty Bronze for the date short-circuits — no MERGE issued."""
         spark = MagicMock()
         bronze_df = MagicMock()

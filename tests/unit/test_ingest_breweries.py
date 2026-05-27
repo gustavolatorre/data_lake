@@ -20,11 +20,11 @@ from src.bronze.ingest_breweries import BREWERY_SCHEMA, _run_ingest, ingest
 @pytest.fixture
 def patched_functions():
     """Patch ``F`` so F.lit / F.col / F.current_timestamp don't need a SparkContext."""
-    with patch("src.bronze.ingest_breweries.F") as mock_F:
-        mock_F.lit.return_value = MagicMock(name="lit_col")
-        mock_F.col.return_value = MagicMock(name="col_col")
-        mock_F.current_timestamp.return_value = MagicMock(name="ts_col")
-        yield mock_F
+    with patch("src.bronze.ingest_breweries.F") as mock_f:
+        mock_f.lit.return_value = MagicMock(name="lit_col")
+        mock_f.col.return_value = MagicMock(name="col_col")
+        mock_f.current_timestamp.return_value = MagicMock(name="ts_col")
+        yield mock_f
 
 
 def _make_mock_spark(table_exists: bool, row_count: int = 5):
