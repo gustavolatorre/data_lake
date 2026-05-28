@@ -76,34 +76,30 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      - name: Install dbt-dremio
-        # dbt-core comes transitively. Pin dbt-dremio to the same version the
-        # Airflow image uses (see docker/Dockerfile.airflow → `dbt-dremio`).
-        # We avoid `uv run` because the parent pyproject.toml has no dbt deps,
-        # so uv would resolve against the wrong environment. Calling the venv
-        # binary directly bypasses that.
+      - name: Install dbt-duckdb (offline parsing only)
+        # dbt-dremio is NOT used here: it tries to authenticate to the Dremio
+        # warehouse even during `dbt parse`, which we can't have on a CI
+        # runner that has no Dremio reachable. dbt-duckdb runs in-memory with
+        # zero network calls, so it satisfies the adapter contract while
+        # letting us validate the project structure (refs, macros, jinja,
+        # schema.yml). The `ci` target in profiles.yml is wired for duckdb.
+        # We call .venv/bin/dbt directly to bypass uv's project resolution
+        # (the parent pyproject.toml has no dbt deps).
         run: |
           uv venv
-          uv pip install "dbt-dremio>=1.10,<1.11"
+          uv pip install "dbt-duckdb>=1.10,<1.11"
 
       - name: dbt deps
+        env:
+          DBT_TARGET: ci
         run: .venv/bin/dbt deps --profiles-dir .
 
       - name: dbt parse
-        # `dbt parse` resolves refs/macros/jinja without hitting the warehouse.
-        # The Dremio env vars below are placeholders — parse does NOT connect.
+        # `dbt parse` resolves refs/macros/jinja with the adapter loaded.
+        # duckdb in-memory satisfies the adapter without any network call.
+        # Catches: broken refs, undefined macros, schema.yml errors, jinja
+        # syntax errors. Does NOT catch Dremio-specific SQL — that's caught
+        # at real `dbt build` time in the Airflow DAG.
         env:
-          DREMIO_ADMIN_USER: ci-placeholder
-          DREMIO_ADMIN_PASSWORD: ci-placeholder
-          DBT_TARGET: dev
+          DBT_TARGET: ci
         run: .venv/bin/dbt parse --profiles-dir .
-
-      - name: dbt compile
-        # `dbt compile` renders SQL templates without executing them. Catches
-        # broken refs, undefined macros, and most schema.yml errors. Still
-        # connectionless when the adapter supports it (dbt-dremio 1.10 does).
-        env:
-          DREMIO_ADMIN_USER: ci-placeholder
-          DREMIO_ADMIN_PASSWORD: ci-placeholder
-          DBT_TARGET: dev
-        run: .venv/bin/dbt compile --profiles-dir .

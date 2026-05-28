@@ -39,3 +39,12 @@ data_lake_gold:
       schema: "gold"
       datalake: "lakehouse"
       threads: 8
+
+    # CI-only target. Uses dbt-duckdb in-memory so `dbt parse` can validate
+    # refs, macros, jinja, and schema.yml WITHOUT connecting to Dremio. Not
+    # intended to actually execute models — Dremio-specific SQL (e.g. the
+    # `AT BRANCH main` clause in snap_breweries) will not compile here.
+    ci:
+      type: duckdb
+      path: ":memory:"
+      threads: 1
