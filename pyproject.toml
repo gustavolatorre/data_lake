@@ -1,6 +1,6 @@
 [project]
 name = "data-lake"
-version = "2.0.0"
+version = "3.1.0"
 description = "Professional data lakehouse pipeline using Airflow, PySpark, Apache Iceberg, and Nessie"
 readme = "README.md"
 requires-python = ">=3.12"

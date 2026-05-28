@@ -59,7 +59,12 @@ for j in $(seq 1 5); do
     break
   else
     echo ">>> [Dremio Setup] Tentativa $j/5: Bootstrap retornou status $BOOTSTRAP_RESPONSE"
-    echo ">>> [Dremio Setup] Resposta: $BOOTSTRAP_BODY"
+    # Print only the error message field if present (sed strips everything else
+    # to avoid leaking the request body which contains the admin password).
+    BOOTSTRAP_ERR=$(echo "$BOOTSTRAP_BODY" | sed -n 's/.*"errorMessage" *: *"\([^"]*\)".*/\1/p')
+    if [ -n "$BOOTSTRAP_ERR" ]; then
+      echo ">>> [Dremio Setup] Erro: $BOOTSTRAP_ERR"
+    fi
     if [ "$j" = "5" ]; then
       echo ">>> [Dremio Setup] Continuando para tentativa de login mesmo com erro no bootstrap..."
     else
@@ -81,7 +86,12 @@ TOKEN=$(echo "$LOGIN_RESPONSE" | sed 's/.*"token":"\([^"]*\)".*/\1/')
 
 if [ -z "$TOKEN" ] || [ "$TOKEN" = "$LOGIN_RESPONSE" ]; then
   echo ">>> [Dremio Setup] ERRO: Falha na autenticação."
-  echo ">>> [Dremio Setup] Resposta: $LOGIN_RESPONSE"
+  # Print only the error message field if present (avoids logging the full
+  # response which may include tokens or echo back the password).
+  LOGIN_ERR=$(echo "$LOGIN_RESPONSE" | sed -n 's/.*"errorMessage" *: *"\([^"]*\)".*/\1/p')
+  if [ -n "$LOGIN_ERR" ]; then
+    echo ">>> [Dremio Setup] Erro: $LOGIN_ERR"
+  fi
   exit 1
 fi
 
@@ -123,12 +133,17 @@ CREATE_RESPONSE=$(curl -s -X PUT "${DREMIO_URL}/apiv2/source/lakehouse/" \
     }
   }")
 
-echo ">>> [Dremio Setup] Resposta da criação: $CREATE_RESPONSE"
-
-# Verifica se o nome aparece na resposta (indica sucesso)
+# SECURITY: do NOT print $CREATE_RESPONSE in full — the request body contains
+# the MinIO access key and secret, and Dremio's response echoes the source
+# config back. We extract only the success marker (name) or the error message.
 if echo "$CREATE_RESPONSE" | grep -q '"name":"lakehouse"'; then
   echo ">>> [Dremio Setup] ✅ Fonte 'lakehouse' criada com sucesso!"
 else
-  echo ">>> [Dremio Setup] ⚠️  Verifique a resposta acima para detalhes do erro."
+  CREATE_ERR=$(echo "$CREATE_RESPONSE" | sed -n 's/.*"errorMessage" *: *"\([^"]*\)".*/\1/p')
+  if [ -n "$CREATE_ERR" ]; then
+    echo ">>> [Dremio Setup] ⚠️  Erro: $CREATE_ERR"
+  else
+    echo ">>> [Dremio Setup] ⚠️  Criação falhou (resposta omitida por conter credenciais)."
+  fi
   exit 1
 fi

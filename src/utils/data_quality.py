@@ -31,22 +31,32 @@ def check_null_counts(
     Raises:
         ValueError: If fail_on_nulls is True and any column has null values.
     """
-    results: dict[str, int] = {}
-
+    # Skip columns that don't exist on the DataFrame (warn once each).
+    valid_columns: list[str] = []
     for col_name in columns:
         if col_name not in df.columns:
             logger.warning("Column '%s' not found in DataFrame, skipping null check", col_name)
             continue
+        valid_columns.append(col_name)
 
-        null_count = df.filter(F.col(col_name).isNull()).count()
-        results[col_name] = null_count
+    if not valid_columns:
+        return {}
 
-        if null_count > 0:
-            msg = f"{null_count} null values found in column '{col_name}'"
-            if fail_on_nulls:
-                logger.error(msg)
-                raise ValueError(msg)
-            logger.warning(msg)
+    # Single aggregation: count nulls for every column in one Spark action,
+    # avoiding the previous N-actions-per-call pattern that triggered a full
+    # scan per column (very expensive on Iceberg).
+    null_row = df.agg(*[F.sum(F.col(c).isNull().cast("int")).alias(c) for c in valid_columns]).collect()[0]
+
+    results: dict[str, int] = {c: int(null_row[c] or 0) for c in valid_columns}
+
+    # Emit warnings (and optionally raise) for every column that has any nulls.
+    nonzero = {c: n for c, n in results.items() if n > 0}
+    if nonzero and fail_on_nulls:
+        msg = "null values found in columns: " + ", ".join(f"{c}={n}" for c, n in nonzero.items())
+        logger.error(msg)
+        raise ValueError(msg)
+    for col_name, null_count in nonzero.items():
+        logger.warning("%d null values found in column '%s'", null_count, col_name)
 
     return results
 

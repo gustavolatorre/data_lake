@@ -10,6 +10,7 @@ import json
 import logging
 
 import requests
+from minio import Minio
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -132,7 +133,7 @@ def _fetch_page(
 
 
 def _upload_json(
-    client,
+    client: Minio,
     bucket: str,
     object_name: str,
     data: list[dict],

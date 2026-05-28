@@ -10,6 +10,7 @@ import sys
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
 from src.utils.data_quality import check_null_counts, log_quality_summary
 from src.utils.spark_session import create_spark_session
@@ -68,22 +69,29 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
     # 2. Apply transformations using native Spark functions (No UDFs!)
     transformed_df = _apply_native_transformations(source_df)
 
-    # Ensure id was never nullified by transformations before writing to Silver
-    check_null_counts(transformed_df, ["id"], fail_on_nulls=True)
-    log_quality_summary(
-        transformed_df,
-        "silver",
-        critical_columns=["id", "name", "brewery_type", "city", "state", "country"],
-    )
+    # Cache the transformed DF before the chain of count-driven steps below
+    # (check_null_counts, log_quality_summary, shrink guard, MERGE source view).
+    # Without this each step re-runs the full Bronze read + transformations.
+    transformed_df.cache()
+    try:
+        # Ensure id was never nullified by transformations before writing to Silver
+        check_null_counts(transformed_df, ["id"], fail_on_nulls=True)
+        log_quality_summary(
+            transformed_df,
+            "silver",
+            critical_columns=["id", "name", "brewery_type", "city", "state", "country"],
+        )
 
-    # 3. Guard rail — protect against partial fetch silently soft-deleting rows
-    _assert_source_not_shrinking(spark, transformed_df)
+        # 3. Guard rail — protect against partial fetch silently soft-deleting rows
+        _assert_source_not_shrinking(spark, transformed_df)
 
-    # 4. Create a temporary view for the MERGE operation
-    transformed_df.createOrReplaceTempView("v_transformed_breweries")
+        # 4. Create a temporary view for the MERGE operation
+        transformed_df.createOrReplaceTempView("v_transformed_breweries")
 
-    # 5. Perform Atomic MERGE into Silver
-    _execute_merge(spark)
+        # 5. Perform Atomic MERGE into Silver
+        _execute_merge(spark)
+    finally:
+        transformed_df.unpersist()
 
 
 def _assert_source_not_shrinking(spark: SparkSession, source_df: DataFrame) -> None:
@@ -160,8 +168,6 @@ def _apply_native_transformations(df: DataFrame) -> DataFrame:
 
     # Deduplicate within the source snapshot (just in case)
     # Using window function here is fine because it's on the source delta, not the target table
-    from pyspark.sql.window import Window
-
     window = Window.partitionBy("id").orderBy(F.col("ingested_at").desc())
 
     df = df.withColumn("_rn", F.row_number().over(window)).filter(F.col("_rn") == 1).drop("_rn")
