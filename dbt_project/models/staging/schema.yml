@@ -14,23 +14,18 @@ models:
         tests:
           - not_null
       - name: brewery_type
-        description: "Type of brewery (ex: micro, nano, regional, brewpub, large, planning, contract, proprietor, closed)."
+        description: "Type of brewery (canonical list lives in seeds/brewery_type_mapping.csv)."
         tests:
           - not_null
-          - accepted_values:
-              # Mirrors dbt_project/seeds/brewery_type_mapping.csv — blocks
-              # unknown types from reaching Gold via dim_brewery_types.
-              values:
-                - micro
-                - nano
-                - regional
-                - brewpub
-                - large
-                - planning
-                - contract
-                - proprietor
-                - closed
-                - taproom
+          # Single source of truth for valid brewery types: the seed. Using
+          # `relationships` against the seed (instead of an inline `accepted_values`)
+          # eliminates the duplication that previously let staging drift out of
+          # sync with the seed (e.g. the seed had `bar` but the inline list did
+          # not, causing test failures on real API data).
+          - relationships:
+              arguments:
+                to: ref('brewery_type_mapping')
+                field: brewery_type
               config:
                 severity: error
       - name: address_1

@@ -12,7 +12,7 @@ import logging
 from datetime import timedelta
 
 import pendulum
-from airflow.operators.bash import BashOperator
+from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import Asset, dag
 from callbacks import build_failure_callback
 
