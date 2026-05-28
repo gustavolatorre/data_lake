@@ -128,11 +128,14 @@ jobs:
           uv pip install "pip-audit>=2.7"
 
       - name: pip-audit (Python deps)
-        # `--strict` makes the step fail on any vulnerability. Combined with
-        # `continue-on-error: true` above we get the report without blocking.
-        # Use `pip-audit --skip-editable` so the project itself is excluded
-        # (we're scanning libraries, not our own code).
-        run: uv run pip-audit --strict --skip-editable
+        # Freeze just the non-editable installed packages into a requirements
+        # file, then audit that. Avoids the "data-lake: distribution marked
+        # as editable" error that pip-audit raises when the local project is
+        # installed with `-e .`.
+        # `--strict` makes the step fail on any vulnerability.
+        run: |
+          uv pip freeze --exclude-editable > /tmp/audit-requirements.txt
+          uv run pip-audit --strict --requirement /tmp/audit-requirements.txt
 
       - name: Trivy filesystem scan
         # Scans the repo for vulnerable dependencies + known CVEs in
