@@ -69,6 +69,7 @@ class TestJsonFormatter:
             raise RuntimeError("boom")
         except RuntimeError:
             import sys
+
             record = _make_record(exc_info=sys.exc_info())
         payload = json.loads(formatter.format(record))
         assert "exception" in payload

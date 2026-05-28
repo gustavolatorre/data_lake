@@ -111,9 +111,9 @@ def _assert_source_not_shrinking(spark: SparkSession, source_df: DataFrame) -> N
         logger.info("Silver table does not exist yet — skipping shrink guard")
         return
 
-    prev_active = spark.sql(
-        "SELECT COUNT(*) AS c FROM nessie.silver.breweries WHERE is_active = true"
-    ).collect()[0]["c"]
+    prev_active = spark.sql("SELECT COUNT(*) AS c FROM nessie.silver.breweries WHERE is_active = true").collect()[0][
+        "c"
+    ]
     if prev_active == 0:
         logger.info("Silver table has 0 active rows — skipping shrink guard")
         return

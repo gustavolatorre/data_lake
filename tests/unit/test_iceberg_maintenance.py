@@ -33,16 +33,12 @@ class TestMaintenanceProcedures:
     def test_rewrite_calls_iceberg_procedure(self):
         spark = MagicMock()
         _rewrite_data_files(spark, "nessie.bronze.breweries")
-        spark.sql.assert_called_once_with(
-            "CALL nessie.system.rewrite_data_files(table => 'nessie.bronze.breweries')"
-        )
+        spark.sql.assert_called_once_with("CALL nessie.system.rewrite_data_files(table => 'nessie.bronze.breweries')")
 
     def test_remove_orphan_calls_iceberg_procedure(self):
         spark = MagicMock()
         _remove_orphan_files(spark, "nessie.silver.breweries")
-        spark.sql.assert_called_once_with(
-            "CALL nessie.system.remove_orphan_files(table => 'nessie.silver.breweries')"
-        )
+        spark.sql.assert_called_once_with("CALL nessie.system.remove_orphan_files(table => 'nessie.silver.breweries')")
 
     def test_expire_snapshots_includes_retention(self):
         spark = MagicMock()

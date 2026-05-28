@@ -55,7 +55,9 @@ def bronze_silver_pipeline():
         task_id="staging_to_bronze",
         conn_id="spark_docker",
         application="/opt/airflow/src/bronze/ingest_breweries.py",
-        application_args=["{{ dag_run.logical_date.strftime('%Y-%m-%d') if (dag_run is defined and dag_run.logical_date is not none) else macros.datetime.now().strftime('%Y-%m-%d') }}"],
+        application_args=[
+            "{{ dag_run.logical_date.strftime('%Y-%m-%d') if (dag_run is defined and dag_run.logical_date is not none) else macros.datetime.now().strftime('%Y-%m-%d') }}"
+        ],
         conf=SPARK_CONF,
         execution_timeout=timedelta(minutes=20),
         retries=2,
@@ -67,7 +69,9 @@ def bronze_silver_pipeline():
         task_id="bronze_to_silver",
         conn_id="spark_docker",
         application="/opt/airflow/src/silver/transform_breweries.py",
-        application_args=["{{ dag_run.logical_date.strftime('%Y-%m-%d') if (dag_run is defined and dag_run.logical_date is not none) else macros.datetime.now().strftime('%Y-%m-%d') }}"],
+        application_args=[
+            "{{ dag_run.logical_date.strftime('%Y-%m-%d') if (dag_run is defined and dag_run.logical_date is not none) else macros.datetime.now().strftime('%Y-%m-%d') }}"
+        ],
         conf=SPARK_CONF,
         outlets=[iceberg_silver_breweries],
         execution_timeout=timedelta(minutes=20),

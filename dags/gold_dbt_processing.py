@@ -56,9 +56,7 @@ def gold_dbt_pipeline():
         # skipped when an upstream test fails. This replaces the previous
         # `dbt run` >> `dbt test` two-task pipeline, which only caught
         # failures after every model was already materialized.
-        bash_command=(
-            f"dbt build --profiles-dir {DBT_PROJECT_DIR} --project-dir {DBT_PROJECT_DIR}"
-        ),
+        bash_command=(f"dbt build --profiles-dir {DBT_PROJECT_DIR} --project-dir {DBT_PROJECT_DIR}"),
         outlets=[iceberg_gold_breweries],  # Asset emitido apenas se build inteiro passar
         execution_timeout=timedelta(minutes=20),
         retries=2,
