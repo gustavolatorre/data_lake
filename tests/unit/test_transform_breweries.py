@@ -179,7 +179,7 @@ class TestExecuteMerge:
         create_table = next((c for c in ddl_calls if "CREATE TABLE" in c), None)
         assert create_table is not None, "first-run path must CREATE TABLE"
         assert "format-version" in create_table
-        assert "'3'" in create_table
+        assert "'2'" in create_table
 
     def test_skips_create_when_table_exists(self):
         spark = MagicMock()

@@ -90,11 +90,11 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
 
         spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.bronze")
 
-        # format-version=3 enables row-lineage and improved deletion vectors.
-        # Only applies to new tables — existing v2 tables remain v2 until rewritten.
+        # format-version=2 enables row-level updates and compatibility with Dremio.
+        # Only applies to new tables.
         writer = (
             df.writeTo(table_name)
-            .tableProperty("format-version", "3")
+            .tableProperty("format-version", "2")
             .partitionedBy(F.col("ingestion_date"))
         )
 

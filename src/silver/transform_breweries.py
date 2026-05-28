@@ -200,7 +200,7 @@ def _execute_merge(spark: SparkSession) -> None:
             )
             USING iceberg
             PARTITIONED BY (state)
-            TBLPROPERTIES ('format-version'='3')
+            TBLPROPERTIES ('format-version'='2')
         """)
 
     spark.sql("""

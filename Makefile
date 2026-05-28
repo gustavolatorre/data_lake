@@ -44,6 +44,9 @@ fernet-key: ## Generate a new Fernet key for Airflow
 webserver-key: ## Generate a new Webserver Secret Key for Airflow
 	@uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 
+jwt-secret-key: ## Generate a new JWT Secret Key for Airflow Execution API
+	@uv run python -c "import secrets; print(secrets.token_hex(32))"
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'

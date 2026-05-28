@@ -94,12 +94,12 @@ class TestRunIngest:
 
     @patch("src.bronze.ingest_breweries.log_quality_summary")
     @patch("src.bronze.ingest_breweries.check_row_count")
-    def test_uses_format_version_3(self, _check, _summary, patched_functions):
+    def test_uses_format_version_2(self, _check, _summary, patched_functions):
         spark, _df, writer = _make_mock_spark(table_exists=True)
 
         _run_ingest(spark, "2026-04-29")
 
-        writer.tableProperty.assert_any_call("format-version", "3")
+        writer.tableProperty.assert_any_call("format-version", "2")
 
     @patch("src.bronze.ingest_breweries.log_quality_summary")
     @patch("src.bronze.ingest_breweries.check_row_count")
