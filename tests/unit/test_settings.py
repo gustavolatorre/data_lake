@@ -92,3 +92,32 @@ class TestGetSettingsCache:
         settings_module.get_settings.cache_clear()
         second = settings_module.get_settings()
         assert first is not second, "after cache_clear, get_settings must return a fresh object"
+
+
+class TestPasswordStrengthValidator:
+    """Settings must refuse banned defaults and too-short MinIO passwords."""
+
+    @pytest.mark.parametrize(
+        "weak",
+        ["password", "admin", "minio", "minio123", "changeme", "<change-me>"],
+    )
+    def test_rejects_banned_value(self, clean_env, monkeypatch, weak):
+        monkeypatch.setenv("MINIO_ROOT_PASSWORD", weak)
+        with pytest.raises(ValidationError, match="banned/default"):
+            settings_module.Settings()  # type: ignore[call-arg]
+
+    def test_rejects_short_password(self, clean_env, monkeypatch):
+        monkeypatch.setenv("MINIO_ROOT_PASSWORD", "short")
+        with pytest.raises(ValidationError, match="too short"):
+            settings_module.Settings()  # type: ignore[call-arg]
+
+    def test_accepts_strong_password(self, clean_env, monkeypatch):
+        monkeypatch.setenv("MINIO_ROOT_PASSWORD", "K9!fJ8mP2nQ7rT4w")
+        s = settings_module.Settings()  # type: ignore[call-arg]
+        assert s.minio_root_password == "K9!fJ8mP2nQ7rT4w"
+
+    def test_case_insensitive_ban(self, clean_env, monkeypatch):
+        """Banned values are matched case-insensitively (also too short at 8 chars)."""
+        monkeypatch.setenv("MINIO_ROOT_PASSWORD", "PASSWORD")
+        with pytest.raises(ValidationError):
+            settings_module.Settings()  # type: ignore[call-arg]

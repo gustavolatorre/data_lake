@@ -7,7 +7,54 @@ credentials, and tunable parameters across the application.
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Passwords that show up in the wild often enough to refuse outright. Adding
+# a value here is a hard error, not a warning — keep the list short and only
+# include strings that no production environment should ever pick.
+_BANNED_PASSWORDS = frozenset(
+    {
+        "",
+        "password",
+        "admin",
+        "airflow",
+        "minio",
+        "minio123",
+        "changeme",
+        "change-me",
+        "<change-me>",
+        "test",
+    }
+)
+
+# Minimum length for any credential. 12 chars matches NIST SP 800-63B guidance
+# for human-chosen passwords; for randomly generated values 24+ is typical.
+_MIN_PASSWORD_LENGTH = 12
+
+
+def _validate_password_strength(value: str, field_name: str) -> str:
+    """Reject obviously-weak values for credential-bearing settings.
+
+    Args:
+        value: Raw setting value.
+        field_name: Field name (used in the error message for diagnostics).
+
+    Returns:
+        The original value if it passes the checks.
+
+    Raises:
+        ValueError: If the value is in the banned list or shorter than
+            ``_MIN_PASSWORD_LENGTH`` characters.
+    """
+    stripped = value.strip()
+    if stripped.lower() in _BANNED_PASSWORDS:
+        msg = f"{field_name} is set to a banned/default value ({stripped!r}); use a strong, unique password."
+        raise ValueError(msg)
+    if len(stripped) < _MIN_PASSWORD_LENGTH:
+        msg = f"{field_name} is too short ({len(stripped)} chars); use at least {_MIN_PASSWORD_LENGTH} characters."
+        raise ValueError(msg)
+    return value
 
 
 class Settings(BaseSettings):
@@ -53,6 +100,11 @@ class Settings(BaseSettings):
     api_base_url: str = "https://api.openbrewerydb.org/v1/breweries"
     api_per_page: int = 50
     api_timeout_seconds: int = 15
+
+    @field_validator("minio_root_password")
+    @classmethod
+    def _reject_weak_minio_password(cls, v: str) -> str:
+        return _validate_password_strength(v, "MINIO_ROOT_PASSWORD")
 
 
 @lru_cache(maxsize=1)
