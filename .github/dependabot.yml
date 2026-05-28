@@ -66,3 +66,14 @@ updates:
     commit-message:
       prefix: "chore(docker)"
       include: "scope"
+    ignore:
+      # These base images MUST stay in lockstep with the pinned pip packages
+      # (pyspark==4.0.0 and apache-airflow==3.2.1 in pyproject.toml). Bumping
+      # the image without bumping the matching pip pin produces a driver vs
+      # cluster protocol mismatch at runtime, which Dependabot cannot detect
+      # because it scans each ecosystem in isolation.
+      # PR #25 (apache/spark 4.0.0 -> 4.1.2) hit exactly this trap.
+      # Upgrades to these images happen by hand alongside the pip pin bump
+      # and any classpath adjustments.
+      - dependency-name: "apache/spark"
+      - dependency-name: "apache/airflow"
