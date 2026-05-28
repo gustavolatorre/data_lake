@@ -92,11 +92,7 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
 
         # format-version=2 enables row-level updates and compatibility with Dremio.
         # Only applies to new tables.
-        writer = (
-            df.writeTo(table_name)
-            .tableProperty("format-version", "2")
-            .partitionedBy(F.col("ingestion_date"))
-        )
+        writer = df.writeTo(table_name).tableProperty("format-version", "2").partitionedBy(F.col("ingestion_date"))
 
         if spark.catalog.tableExists(table_name):
             logger.info("Table %s exists. Overwriting partition for ingestion_date.", table_name)

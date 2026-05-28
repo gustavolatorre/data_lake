@@ -188,9 +188,7 @@ class TestExecuteMerge:
         _execute_merge(spark)
 
         ddl_calls = [args[0] for args, _ in spark.sql.call_args_list]
-        assert not any("CREATE TABLE" in c for c in ddl_calls), (
-            "should not CREATE TABLE when it already exists"
-        )
+        assert not any("CREATE TABLE" in c for c in ddl_calls), "should not CREATE TABLE when it already exists"
 
     def test_issues_merge_with_soft_delete_clauses(self):
         spark = MagicMock()
@@ -308,7 +306,5 @@ class TestRunTransformEmptySource:
         _run_transform(spark, "2026-04-29")
 
         # No MERGE was issued
-        merge_calls = [
-            args[0] for args, _ in spark.sql.call_args_list if "MERGE" in str(args[0])
-        ]
+        merge_calls = [args[0] for args, _ in spark.sql.call_args_list if "MERGE" in str(args[0])]
         assert merge_calls == []

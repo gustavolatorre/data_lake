@@ -71,10 +71,7 @@ def test_configures_iceberg_extension(mock_get_settings, mock_spark_cls, builder
     create_spark_session("test")
 
     configs = _collected_configs(builder_mock)
-    assert (
-        configs.get("spark.sql.extensions")
-        == "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
-    )
+    assert configs.get("spark.sql.extensions") == "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
 
 
 @patch("src.utils.spark_session.SparkSession")
@@ -88,10 +85,7 @@ def test_configures_nessie_catalog(mock_get_settings, mock_spark_cls, builder, m
 
     configs = _collected_configs(builder_mock)
     assert configs.get("spark.sql.catalog.nessie") == "org.apache.iceberg.spark.SparkCatalog"
-    assert (
-        configs.get("spark.sql.catalog.nessie.catalog-impl")
-        == "org.apache.iceberg.nessie.NessieCatalog"
-    )
+    assert configs.get("spark.sql.catalog.nessie.catalog-impl") == "org.apache.iceberg.nessie.NessieCatalog"
     assert configs.get("spark.sql.catalog.nessie.uri") == "http://nessie:19120/api/v2"
     assert configs.get("spark.sql.catalog.nessie.ref") == "main"
     assert configs.get("spark.sql.catalog.nessie.warehouse") == "s3a://warehouse/"
@@ -99,9 +93,7 @@ def test_configures_nessie_catalog(mock_get_settings, mock_spark_cls, builder, m
 
 @patch("src.utils.spark_session.SparkSession")
 @patch("src.utils.spark_session.get_settings")
-def test_configures_s3a_credentials_from_settings(
-    mock_get_settings, mock_spark_cls, builder, mock_settings
-):
+def test_configures_s3a_credentials_from_settings(mock_get_settings, mock_spark_cls, builder, mock_settings):
     builder_mock, _ = builder
     mock_spark_cls.builder = builder_mock
     mock_get_settings.return_value = mock_settings

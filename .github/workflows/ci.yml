@@ -16,6 +16,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
 
       - name: Create venv and install dev dependencies
         run: |
@@ -24,6 +26,9 @@ jobs:
 
       - name: Ruff lint
         run: uv run ruff check src/ tests/ dags/
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/ tests/ dags/
 
       - name: Mypy type check
         run: uv run mypy src/
@@ -43,6 +48,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
 
       - name: Create venv and install dev dependencies
         run: |
@@ -54,3 +61,46 @@ jobs:
           MINIO_ROOT_USER: test-user
           MINIO_ROOT_PASSWORD: test-password
         run: uv run pytest --cov=src --cov-report=term-missing tests/
+
+  dbt-validate:
+    name: dbt Validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt_project
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dbt-dremio
+        # dbt-core comes transitively. Pin dbt-dremio to the same version the
+        # Airflow image uses (see docker/Dockerfile.airflow → `dbt-dremio`).
+        run: |
+          uv venv
+          uv pip install "dbt-dremio>=1.10,<1.11"
+
+      - name: dbt deps
+        run: uv run dbt deps --profiles-dir .
+
+      - name: dbt parse
+        # `dbt parse` resolves refs/macros/jinja without hitting the warehouse.
+        # The Dremio env vars below are placeholders — parse does NOT connect.
+        env:
+          DREMIO_ADMIN_USER: ci-placeholder
+          DREMIO_ADMIN_PASSWORD: ci-placeholder
+          DBT_TARGET: dev
+        run: uv run dbt parse --profiles-dir .
+
+      - name: dbt compile
+        # `dbt compile` renders SQL templates without executing them. Catches
+        # broken refs, undefined macros, and most schema.yml errors. Still
+        # connectionless when the adapter supports it (dbt-dremio 1.10 does).
+        env:
+          DREMIO_ADMIN_USER: ci-placeholder
+          DREMIO_ADMIN_PASSWORD: ci-placeholder
+          DBT_TARGET: dev
+        run: uv run dbt compile --profiles-dir .

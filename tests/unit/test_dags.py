@@ -105,9 +105,7 @@ class TestDagStructure:
     def test_asset_uri_declared(self, filename, spec):
         tree = _parse(filename)
         strings = _collect_string_constants(tree)
-        assert spec["asset_uri"] in strings, (
-            f"{filename} does not reference its expected asset URI {spec['asset_uri']}"
-        )
+        assert spec["asset_uri"] in strings, f"{filename} does not reference its expected asset URI {spec['asset_uri']}"
 
     @pytest.mark.parametrize(
         "filename,spec",
@@ -116,9 +114,7 @@ class TestDagStructure:
     def test_dag_id_declared(self, filename, spec):
         tree = _parse(filename)
         strings = _collect_string_constants(tree)
-        assert spec["dag_id"] in strings, (
-            f"{filename} does not declare dag_id={spec['dag_id']}"
-        )
+        assert spec["dag_id"] in strings, f"{filename} does not declare dag_id={spec['dag_id']}"
 
     @pytest.mark.parametrize(
         "filename,spec",
@@ -150,6 +146,4 @@ class TestFailureCallbacks:
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         assigned_names.add(target.id)
-        assert "on_failure_callback" in (func_names | assigned_names), (
-            f"{filename} does not bind on_failure_callback"
-        )
+        assert "on_failure_callback" in (func_names | assigned_names), f"{filename} does not bind on_failure_callback"
