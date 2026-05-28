@@ -22,6 +22,8 @@ x-airflow-common: &airflow-common
   environment:
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_USER}:admin"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: "/opt/airflow/simple_auth_passwords.json"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://webserver:8080/execution/"
+    PYTHONPATH: "/opt/airflow"
   volumes:
     - ./src:/opt/airflow/src
     - ./dags:/opt/airflow/dags
