@@ -1,0 +1,38 @@
+# Changelog
+
+All notable changes are listed here. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+The internal `ROADMAP.md` (gitignored) holds the deeper item-by-item story —
+this file is the public, summarized view.
+
+## [Unreleased]
+
+### Added
+- **CI hardening (Wave E)**: `WORKDIR` refactor in `Dockerfile.spark` to satisfy Trivy DS-0013; `ARCHITECTURE.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`.
+
+### Changed
+- `Dockerfile.spark` now uses three explicit `WORKDIR` blocks instead of `RUN ... cd ...` for the from-source Python 3.12 build.
+
+## [3.1.0] — 2026-05-28
+
+### Added (P0/P1/P2/P3)
+- **P0** — Rotated credentials, removed `admin:admin` defaults, unbound Nessie/Spark from host, pinned Docker images, made Bronze idempotent via `overwritePartitions`, added `.gitattributes` to force LF.
+- **P1** — Pushed test coverage from ~53% to ≥85%, added `iceberg_maintenance` weekly DAG, added `_assert_source_not_shrinking` guard in Silver, migrated `dbt run + dbt test` to `dbt build`.
+- **P2** — Made `check_null_counts` single-pass, cached the Silver MERGE source, dropped the deprecated `BashOperator` and `secret_key` paths, replaced the Spark connection plugin with `AIRFLOW_CONN_SPARK_DOCKER`, added `make init-secrets`, joined `brewery_type_mapping` seed into `dim_brewery_types`.
+- **P3** — Added `.pre-commit-config.yaml`, Dependabot config, and `Security` CI job (`pip-audit` + Trivy fs + Trivy config).
+
+### Fixed
+- JWT secret missing from `airflow.env` caused zombie tasks (`pid=None`).
+- Em-dash (`—`) in seed broke `dbt build` on Dremio due to COLLATE mismatch — replaced with ASCII hyphen.
+- 4 brewery types (`taproom`, `beergarden`, `cidery`, `location`) were missing from the seed, breaking the `relationships` test against real API data.
+
+### Removed
+- `plugins/create_spark_connection.py` (Airflow 3 forbids ORM access during plugin load).
+
+### Reverted
+- **P1.8** — bcrypt-hashed `simple_auth_passwords.json`. SimpleAuthManager does string-equality on the password, not bcrypt verification. Plaintext restored; full fix tracked as P3.10.
+- **P1.15** — Iceberg `format-version=3`. Dremio 25.0.0 cannot read it. Reverted to v2 in both Bronze and Silver.
+
+## [2.0.0] — Before 2026-05-27
+
+Pre-audit baseline. See `git log b2ab079..` for the day-by-day history.
