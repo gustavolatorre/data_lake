@@ -5,26 +5,43 @@ USER root
 # Build Python 3.12 from source to match the Airflow driver (Python 3.12).
 # The base image is Ubuntu 20.04 (GLIBC 2.31), so we cannot copy binaries
 # from newer Debian-based images. Compiling from source ensures ABI compat.
+#
+# Trivy DS-0013 flagged the previous all-in-one `RUN ... cd Python-... && ...`.
+# Split into three stages with explicit WORKDIR transitions:
+#   1. install build deps + download + verify tarball (in /tmp/python-build)
+#   2. configure + make + make install (cwd = extracted source dir)
+#   3. cleanup + runtime pip installs + apt purge (back at /)
+# The extra layers cost a few MB but keep us linted and make the steps
+# auditable.
 ARG PYTHON_VERSION=3.12.4
 ARG PYTHON_SHA256=01b3c1c082196f3b33168d344a9c85fb07bfe0e7ecfe77fee4443420d1ce2ad9
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl build-essential zlib1g-dev libssl-dev libffi-dev \
-    libbz2-dev libreadline-dev libsqlite3-dev liblzma-dev && \
+
+WORKDIR /tmp/python-build
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl build-essential zlib1g-dev libssl-dev libffi-dev \
+        libbz2-dev libreadline-dev libsqlite3-dev liblzma-dev && \
     curl -fSL "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz" \
         -o "Python-${PYTHON_VERSION}.tgz" && \
     echo "${PYTHON_SHA256}  Python-${PYTHON_VERSION}.tgz" | sha256sum -c - && \
     tar xzf "Python-${PYTHON_VERSION}.tgz" && \
-    rm "Python-${PYTHON_VERSION}.tgz" && \
-    cd Python-3.12.4 && \
-    ./configure --enable-optimizations --prefix=/usr/local && \
-    make -j$(nproc) && make install && \
-    cd .. && rm -rf Python-3.12.4 && \
+    rm "Python-${PYTHON_VERSION}.tgz"
+
+WORKDIR /tmp/python-build/Python-3.12.4
+RUN ./configure --enable-optimizations --prefix=/usr/local && \
+    make -j"$(nproc)" && \
+    make install
+
+WORKDIR /
+RUN rm -rf /tmp/python-build && \
     python3.12 -m pip install --no-cache-dir \
-    pydantic-settings>=2.0 \
-    minio>=7.2.0 \
-    python-dotenv>=1.0.0 && \
-    apt-get purge -y build-essential && apt-get autoremove -y && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+        "pydantic-settings>=2.0" \
+        "minio>=7.2.0" \
+        "python-dotenv>=1.0.0" && \
+    apt-get purge -y build-essential && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 ENV PYSPARK_PYTHON=/usr/local/bin/python3.12
 ENV PYSPARK_DRIVER_PYTHON=/usr/local/bin/python3.12
