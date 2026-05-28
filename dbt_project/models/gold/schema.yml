@@ -35,8 +35,9 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('brewery_type_mapping')
-              field: brewery_type
+              arguments:
+                to: ref('brewery_type_mapping')
+                field: brewery_type
 
   - name: fact_breweries
     description: "Central Fact table for breweries. Materialized incrementally with merge strategy."
@@ -51,15 +52,17 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('dim_locations')
-              field: location_key
+              arguments:
+                to: ref('dim_locations')
+                field: location_key
       - name: brewery_type_key
         description: "Foreign key linking to dim_brewery_types."
         tests:
           - not_null
           - relationships:
-              to: ref('dim_brewery_types')
-              field: brewery_type_key
+              arguments:
+                to: ref('dim_brewery_types')
+                field: brewery_type_key
       - name: id_business
         description: "Original business identifier from the source API."
       - name: name
