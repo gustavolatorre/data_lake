@@ -1,11 +1,11 @@
 brewery_type,description
-micro,Most craft breweries. For example Samuel Adams is still considered a micro brewery.
-nano,An extremely small brewery which typically only distributes locally.
-regional,A regional location of an expanded brewery (e.g., Sierra Nevada in Asheville).
-brewpub,A beer-focused restaurant or restaurant/bar with a brewery on premises.
-large,A very large brewery. Likely not for visitors. Megabreweries like AB-InBev.
-planning,A brewery in planning or not yet opened.
-bar,A bar. Brewery is unknown or unverified.
-contract,A brewery that uses another brewery's equipment.
-proprietor,A brewery that operates out of an existing brewery.
-closed,A location which has been closed.
+micro,"Most craft breweries. For example Samuel Adams is still considered a micro brewery."
+nano,"An extremely small brewery which typically only distributes locally."
+regional,"A regional location of an expanded brewery (e.g., Sierra Nevada in Asheville)."
+brewpub,"A beer-focused restaurant or restaurant/bar with a brewery on premises."
+large,"A very large brewery. Likely not for visitors. Megabreweries like AB-InBev."
+planning,"A brewery in planning or not yet opened."
+bar,"A bar. Brewery is unknown or unverified."
+contract,"A brewery that uses another brewery's equipment."
+proprietor,"A brewery that operates out of an existing brewery."
+closed,"A location which has been closed."
