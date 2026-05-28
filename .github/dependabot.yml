@@ -1,0 +1,68 @@
+# Keep dependencies fresh across the 3 ecosystems we actually consume.
+# Weekly cadence on Mondays keeps the noise contained and grouped.
+# A PR limit of 5 per ecosystem stops Dependabot from drowning us if
+# upstream cuts many releases in a single week.
+version: 2
+
+updates:
+  # ── Python (pyproject.toml + uv.lock) ─────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Bundle minor + patch upgrades into a single PR per group so the
+      # review queue does not explode.
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      # PySpark and the Airflow stack are pinned to specific versions in the
+      # Docker images for classpath / JAR compatibility. Bumping them through
+      # Dependabot would land a broken image; we upgrade those manually with
+      # the matching Dockerfile changes.
+      - dependency-name: "pyspark"
+      - dependency-name: "apache-airflow"
+      - dependency-name: "apache-airflow-providers-*"
+
+  # ── GitHub Actions ────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
+  # ── Docker base images ────────────────────────────────────────
+  # Dependabot scans both Dockerfiles for `FROM` directives.
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
