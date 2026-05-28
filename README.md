@@ -144,7 +144,7 @@ The Silver layer trims this down to the analytical subset (`id`, `name`, `brewer
 Two pieces of plumbing make the stack work out of the box without manual UI clicks:
 
 *   **Dremio sources** (`docker/dremio/setup_sources.sh`): runs once via the `dremio-setup` container after Dremio becomes healthy. Registers the Nessie catalog and the MinIO `warehouse` bucket as Dremio sources, so dbt can immediately query `lakehouse.silver.breweries` and write into the `gold` space.
-*   **Airflow Spark connection** (`plugins/create_spark_connection.py`): a startup-time Airflow plugin that creates the `spark_docker` connection (pointing at `spark://spark-master:7077`) in the Airflow metadata DB if it doesn't already exist. The DAGs reference this connection via `conn_id="spark_docker"` — no need to add it manually through the Airflow UI.
+*   **Airflow Spark connection** (`AIRFLOW_CONN_SPARK_DOCKER` env var in `docker-compose.yml`): defines the `spark_docker` connection (pointing at `spark://spark-master:7077`) directly through the Airflow 3 environment-variable convention — no plugin, no metadata DB writes, no manual UI clicks. DAGs reference this connection via `conn_id="spark_docker"`.
 
 ---
 

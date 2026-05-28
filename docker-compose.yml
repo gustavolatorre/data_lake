@@ -24,6 +24,11 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: "/opt/airflow/simple_auth_passwords.json"
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://webserver:8080/execution/"
     PYTHONPATH: "/opt/airflow"
+    # Spark connection wired via env var (Airflow 3 idiom). Replaces the
+    # legacy plugins/create_spark_connection.py which used @provide_session +
+    # ORM, blocked by RuntimeError: "Direct database access via the ORM is
+    # not allowed in Airflow 3.0".
+    AIRFLOW_CONN_SPARK_DOCKER: "spark://spark-master:7077/?deploy_mode=client"
   volumes:
     - ./src:/opt/airflow/src
     - ./dags:/opt/airflow/dags

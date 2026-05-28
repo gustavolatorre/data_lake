@@ -38,6 +38,8 @@ models:
               arguments:
                 to: ref('brewery_type_mapping')
                 field: brewery_type
+      - name: brewery_type_description
+        description: "Human-readable description of the brewery type, joined from the brewery_type_mapping seed. NULL only when a brewery_type exists in Silver but is missing from the seed (which the relationships test above will flag)."
 
   - name: fact_breweries
     description: "Central Fact table for breweries. Materialized incrementally with merge strategy."

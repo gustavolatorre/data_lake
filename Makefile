@@ -1,4 +1,4 @@
-.PHONY: up down restart logs test lint fmt clean help
+.PHONY: up down restart logs test lint fmt clean help init-secrets
 
 ## —— Docker ——————————————————————————————————————————
 up: ## Start all services
@@ -46,6 +46,22 @@ webserver-key: ## Generate a new Webserver Secret Key for Airflow
 
 jwt-secret-key: ## Generate a new JWT Secret Key for Airflow Execution API
 	@uv run python -c "import secrets; print(secrets.token_hex(32))"
+
+init-secrets: ## Bootstrap airflow.env from .example with fresh Fernet + Webserver + JWT keys (idempotent: refuses to overwrite an existing airflow.env)
+	@if [ -f airflow.env ]; then \
+		echo "❌ airflow.env already exists — refusing to overwrite."; \
+		echo "   Remove it manually and re-run if you really want fresh keys."; \
+		exit 1; \
+	fi
+	@cp airflow.env.example airflow.env
+	@FERNET_KEY=$$(uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"); \
+	WEBSERVER_KEY=$$(uv run python -c "import secrets; print(secrets.token_urlsafe(32))"); \
+	JWT_KEY=$$(uv run python -c "import secrets; print(secrets.token_hex(32))"); \
+	sed -i "s|your_generated_fernet_key_here|$$FERNET_KEY|g" airflow.env; \
+	sed -i "s|your_generated_secret_key_here|$$WEBSERVER_KEY|g" airflow.env; \
+	sed -i "s|your_generated_jwt_secret_key_here|$$JWT_KEY|g" airflow.env
+	@echo "✅ airflow.env written with fresh Fernet + Webserver + JWT keys."
+	@echo "   Remember to fill in MINIO_*, POSTGRES_*, DREMIO_* in .env."
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
