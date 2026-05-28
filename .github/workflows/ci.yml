@@ -137,7 +137,7 @@ jobs:
       - name: Trivy filesystem scan
         # Scans the repo for vulnerable dependencies + known CVEs in
         # Dockerfiles. `severity: HIGH,CRITICAL` keeps signal-to-noise high.
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -149,7 +149,7 @@ jobs:
       - name: Trivy config scan (Dockerfiles + compose)
         # Misconfigurations only — secrets, root containers, missing healthchecks,
         # etc. Less noisy than vuln scans, so we surface MEDIUM+ here.
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: config
           scan-ref: .
