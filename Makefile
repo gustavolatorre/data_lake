@@ -1,4 +1,4 @@
-.PHONY: up down restart logs test lint fmt clean help init-secrets
+.PHONY: up down restart logs test lint fmt clean help init-secrets init-precommit security-scan
 
 ## —— Docker ——————————————————————————————————————————
 up: ## Start all services
@@ -46,6 +46,16 @@ webserver-key: ## Generate a new Webserver Secret Key for Airflow
 
 jwt-secret-key: ## Generate a new JWT Secret Key for Airflow Execution API
 	@uv run python -c "import secrets; print(secrets.token_hex(32))"
+
+init-precommit: ## Install pre-commit + detect-secrets, then register Git hooks
+	@uv pip install pre-commit detect-secrets
+	@uv run pre-commit install
+	@echo "✅ pre-commit hooks installed."
+	@echo "   Hooks run automatically on 'git commit'. Use 'pre-commit run --all-files' to check the whole repo."
+
+security-scan: ## Run pip-audit + check for known CVEs in dependencies (mirrors the CI Security job)
+	@uv pip install "pip-audit>=2.7"
+	@uv run pip-audit --strict --skip-editable
 
 init-secrets: ## Bootstrap airflow.env from .example with fresh Fernet + Webserver + JWT keys (idempotent: refuses to overwrite an existing airflow.env)
 	@if [ -f airflow.env ]; then \
