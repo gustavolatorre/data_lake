@@ -79,6 +79,9 @@ class TestRunMaintenance:
 
 
 class TestModuleConstants:
-    def test_maintained_tables_covers_bronze_and_silver(self):
+    def test_maintained_tables_covers_bronze_silver_and_quarantine(self):
         assert "nessie.bronze.breweries" in MAINTAINED_TABLES
         assert "nessie.silver.breweries" in MAINTAINED_TABLES
+        # P3.8 — the quarantine sink is append-only so small-file accumulation
+        # is a real risk; it must be on the maintenance roster.
+        assert "nessie.silver.breweries_quarantine" in MAINTAINED_TABLES

@@ -60,6 +60,11 @@ containers (`minio-setup`, `dremio-setup`).
   Protects against partial API fetches silently deactivating half the table.
 - Soft-delete: rows missing from today's source get `is_active=false` and a
   new `updated_at` — they remain queryable, just flagged.
+- **Quarantine sink** (`nessie.silver.breweries_quarantine`, append-only,
+  partitioned by `quarantine_date`): rows that fail row-level rules (currently
+  `id IS NULL`) are diverted here instead of aborting the run. The MERGE then
+  proceeds on the cleaned subset. Each quarantined row carries a stable
+  `quarantine_reason` code (e.g. `NULL_ID`) for downstream alerting.
 
 ### Gold guarantees
 - `dbt build` (not `dbt run` then `dbt test`) — tests are blocking and run
@@ -105,7 +110,7 @@ Iceberg `format-version=2` everywhere. v3 was attempted (P1.15) but Dremio
 | `dbt Validate` CI job | PR | `dbt deps + parse` via `dbt-duckdb` (connectionless) |
 | `Security` CI job | PR | `pip-audit`, Trivy fs (HIGH+), Trivy config (MEDIUM+) — `continue-on-error` while burning down baseline |
 | `_assert_source_not_shrinking` | Silver Spark job | Partial fetch protection |
-| `check_null_counts(..., fail_on_nulls=True)` | Silver Spark job | NULL id detection |
+| Quarantine split (`id IS NULL`) | Silver Spark job | Diverts bad rows to `breweries_quarantine` instead of aborting |
 | `dbt build` tests (`unique`, `not_null`, `relationships`, `freshness`) | Gold Airflow task | Cross-layer integrity |
 
 ## 6. Credentials & secrets
@@ -131,6 +136,7 @@ Bootstrap helper: `make init-secrets` copies `airflow.env.example` to
 | `Failed to load plugin spark_connection_plugin` | You're on a pre-PR#17 image; rebuild — plugin was removed in favor of `AIRFLOW_CONN_*` |
 | `dremio-setup` crash-loop with `syntax error: unexpected word` | CRLF line endings in `setup_sources.sh` (Windows checkout without `.gitattributes` LF coercion). Fix: re-clone or `git rm --cached -r . && git reset --hard` |
 | Silver MERGE refuses with `SourceShrinkError` | Today's API fetch was partial. Investigate `staging_ingestion` task logs before clearing |
+| Rows missing from Silver but present in Bronze | Check `nessie.silver.breweries_quarantine WHERE quarantine_date = '<date>'` — they probably failed `id IS NULL` |
 
 ## 8. Roadmap pointer
 

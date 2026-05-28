@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 MAINTAINED_TABLES = [
     "nessie.bronze.breweries",
     "nessie.silver.breweries",
+    "nessie.silver.breweries_quarantine",
 ]
 
 
