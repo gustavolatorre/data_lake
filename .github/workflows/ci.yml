@@ -79,12 +79,15 @@ jobs:
       - name: Install dbt-dremio
         # dbt-core comes transitively. Pin dbt-dremio to the same version the
         # Airflow image uses (see docker/Dockerfile.airflow → `dbt-dremio`).
+        # We avoid `uv run` because the parent pyproject.toml has no dbt deps,
+        # so uv would resolve against the wrong environment. Calling the venv
+        # binary directly bypasses that.
         run: |
           uv venv
           uv pip install "dbt-dremio>=1.10,<1.11"
 
       - name: dbt deps
-        run: uv run dbt deps --profiles-dir .
+        run: .venv/bin/dbt deps --profiles-dir .
 
       - name: dbt parse
         # `dbt parse` resolves refs/macros/jinja without hitting the warehouse.
@@ -93,7 +96,7 @@ jobs:
           DREMIO_ADMIN_USER: ci-placeholder
           DREMIO_ADMIN_PASSWORD: ci-placeholder
           DBT_TARGET: dev
-        run: uv run dbt parse --profiles-dir .
+        run: .venv/bin/dbt parse --profiles-dir .
 
       - name: dbt compile
         # `dbt compile` renders SQL templates without executing them. Catches
@@ -103,4 +106,4 @@ jobs:
           DREMIO_ADMIN_USER: ci-placeholder
           DREMIO_ADMIN_PASSWORD: ci-placeholder
           DBT_TARGET: dev
-        run: uv run dbt compile --profiles-dir .
+        run: .venv/bin/dbt compile --profiles-dir .
