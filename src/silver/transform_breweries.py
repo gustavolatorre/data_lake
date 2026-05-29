@@ -61,8 +61,19 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
     # 1. Read the latest snapshot from Bronze (filtered by execution_date)
     logger.info("Reading Bronze data for ingestion_date=%s", execution_date)
 
-    # We read the specific partition to ensure we are only processing the latest arrival
-    source_df = spark.table("nessie.bronze.breweries").filter(F.col("ingestion_date") == execution_date)
+    # We read the specific partition to ensure we are only processing the latest arrival.
+    # The dual filter is intentional after P2.3:
+    #   * ingestion_date (string)     — preserves the historical query contract
+    #     so anything joining on it keeps working.
+    #   * ingestion_ts (timestamp)    — gives Iceberg the predicate it needs to
+    #     prune to a single days(ingestion_ts) partition, instead of scanning
+    #     the whole Bronze table.
+    execution_ts = F.to_timestamp(F.lit(execution_date), "yyyy-MM-dd")
+    source_df = (
+        spark.table("nessie.bronze.breweries")
+        .filter(F.col("ingestion_date") == execution_date)
+        .filter(F.col("ingestion_ts") == execution_ts)
+    )
 
     if source_df.isEmpty():
         logger.warning("No data found in Bronze for date %s", execution_date)

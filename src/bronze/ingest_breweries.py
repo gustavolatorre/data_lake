@@ -9,6 +9,10 @@ import sys
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+
+# Iceberg partition transform. The shim in pyspark.sql.functions was
+# deprecated in 4.0 in favor of pyspark.sql.functions.partitioning.
+from pyspark.sql.functions.partitioning import days
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
 from src.utils.data_quality import check_row_count, log_quality_summary
@@ -71,9 +75,16 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
 
     df = spark.read.schema(BREWERY_SCHEMA).option("multiline", "true").json(staging_path)
 
-    # Add ingestion metadata
+    # Add ingestion metadata.
+    # ingestion_date: stable string YYYY-MM-DD; used by Silver as a join key.
+    # ingested_at:    real wall-clock — useful in forensics + dedup window.
+    # ingestion_ts:   logical timestamp tied to execution_date — drives the
+    #                 hidden partitioning. Two re-runs of the same
+    #                 execution_date keep landing on the SAME partition,
+    #                 preserving idempotency under overwritePartitions().
     df = df.withColumn("ingestion_date", F.lit(execution_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
+    df = df.withColumn("ingestion_ts", F.to_timestamp(F.lit(execution_date), "yyyy-MM-dd"))
 
     # Cache before quality checks + write — avoids 3x re-scan of the JSON in S3
     df.cache()
@@ -98,7 +109,18 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
 
         # format-version=2 enables row-level updates and compatibility with Dremio.
         # Only applies to new tables.
-        writer = df.writeTo(table_name).tableProperty("format-version", "2").partitionedBy(F.col("ingestion_date"))
+        #
+        # P2.3 — Hidden partitioning by days(ingestion_ts) (timestamp transform).
+        # Why hidden over plain `ingestion_date`:
+        #   * Iceberg owns the partition spec; we can later add hours(...) or
+        #     months(...) without rewriting data.
+        #   * Type-safe: pruning works off a real timestamp, not a YYYY-MM-DD
+        #     string that future analysts might compare wrong.
+        # We pick `ingestion_ts` (derived from execution_date) and NOT
+        # `ingested_at` because the latter is wall-clock; re-running the same
+        # execution_date on a different real day would otherwise land in a
+        # different partition and break overwritePartitions() idempotency.
+        writer = df.writeTo(table_name).tableProperty("format-version", "2").partitionedBy(days(F.col("ingestion_ts")))
 
         if spark.catalog.tableExists(table_name):
             logger.info("Table %s exists. Overwriting partition for ingestion_date.", table_name)

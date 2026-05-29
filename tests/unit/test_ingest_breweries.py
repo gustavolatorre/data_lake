@@ -19,12 +19,19 @@ from src.bronze.ingest_breweries import BREWERY_SCHEMA, _run_ingest, ingest
 
 @pytest.fixture
 def patched_functions():
-    """Patch ``F`` so F.lit / F.col / F.current_timestamp don't need a SparkContext."""
+    """Patch ``F`` so F.lit / F.col / F.current_timestamp / F.to_timestamp don't need a SparkContext."""
     with patch("src.bronze.ingest_breweries.F") as mock_f:
         mock_f.lit.return_value = MagicMock(name="lit_col")
         mock_f.col.return_value = MagicMock(name="col_col")
         mock_f.current_timestamp.return_value = MagicMock(name="ts_col")
-        yield mock_f
+        mock_f.to_timestamp.return_value = MagicMock(name="ingestion_ts_col")
+        # The Iceberg `days` transform is imported standalone — patch it on
+        # the same module so calls to ``.partitionedBy(days(...))`` don't
+        # try to reach a real JVM column.
+        with patch("src.bronze.ingest_breweries.days") as mock_days:
+            mock_days.return_value = MagicMock(name="days_transform_col")
+            mock_f._days = mock_days  # type: ignore[attr-defined]  # expose for tests that want to assert
+            yield mock_f
 
 
 @pytest.fixture(autouse=True)
@@ -112,6 +119,35 @@ class TestRunIngest:
         _run_ingest(spark, "2026-04-29")
 
         writer.tableProperty.assert_any_call("format-version", "2")
+
+    @patch("src.bronze.ingest_breweries.log_quality_summary")
+    @patch("src.bronze.ingest_breweries.check_row_count")
+    def test_partitions_by_days_of_ingestion_ts(self, _check, _summary, patched_functions):
+        """P2.3: hidden partitioning uses days(ingestion_ts), not the ingestion_date string."""
+        spark, _df, writer = _make_mock_spark(table_exists=True)
+
+        _run_ingest(spark, "2026-04-29")
+
+        # Iceberg `days()` was called once, on the ingestion_ts column.
+        mock_days = patched_functions._days
+        mock_days.assert_called_once()
+        # `F.col("ingestion_ts")` was the input.
+        patched_functions.col.assert_any_call("ingestion_ts")
+        # The writer received the transform — not the raw column.
+        writer.partitionedBy.assert_called_with(mock_days.return_value)
+
+    @patch("src.bronze.ingest_breweries.log_quality_summary")
+    @patch("src.bronze.ingest_breweries.check_row_count")
+    def test_adds_ingestion_ts_column(self, _check, _summary, patched_functions):
+        """P2.3: every row gets an ingestion_ts derived from execution_date."""
+        spark, df, _writer = _make_mock_spark(table_exists=True)
+
+        _run_ingest(spark, "2026-04-29")
+
+        added_columns = [call.args[0] for call in df.withColumn.call_args_list]
+        assert "ingestion_ts" in added_columns
+        # F.to_timestamp was the function used for the cast.
+        patched_functions.to_timestamp.assert_called()
 
     @patch("src.bronze.ingest_breweries.log_quality_summary")
     @patch("src.bronze.ingest_breweries.check_row_count")
