@@ -48,10 +48,10 @@ RUN set -eu && \
     MAVEN="https://repo1.maven.org/maven2" && \
     ICEBERG_URL="${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-4.0_2.13/${ICEBERG_VERSION}/iceberg-spark-runtime-4.0_2.13-${ICEBERG_VERSION}.jar" && \
     curl -fSL "${ICEBERG_URL}" -o "${PYSPARK_JARS}/iceberg-spark-runtime.jar" && \
-    echo "$(curl -fsSL ${ICEBERG_URL}.sha512)  ${PYSPARK_JARS}/iceberg-spark-runtime.jar" | sha512sum -c - && \
+    echo "$(curl -fsSL ${ICEBERG_URL}.sha512 | tr -d '\r\n')  ${PYSPARK_JARS}/iceberg-spark-runtime.jar" | sha512sum -c - && \
     HADOOP_AWS_URL="${MAVEN}/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" && \
     curl -fSL "${HADOOP_AWS_URL}" -o "${PYSPARK_JARS}/hadoop-aws.jar" && \
-    echo "$(curl -fsSL ${HADOOP_AWS_URL}.sha512)  ${PYSPARK_JARS}/hadoop-aws.jar" | sha512sum -c - && \
+    echo "$(curl -fsSL ${HADOOP_AWS_URL}.sha1 | tr -d '\r\n')  ${PYSPARK_JARS}/hadoop-aws.jar" | sha1sum -c - && \
     AWS_SDK_URL="${MAVEN}/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar" && \
     curl -fSL "${AWS_SDK_URL}" -o "${PYSPARK_JARS}/aws-java-sdk-bundle.jar" && \
-    echo "$(curl -fsSL ${AWS_SDK_URL}.sha512)  ${PYSPARK_JARS}/aws-java-sdk-bundle.jar" | sha512sum -c -
+    echo "$(curl -fsSL ${AWS_SDK_URL}.sha1 | tr -d '\r\n')  ${PYSPARK_JARS}/aws-java-sdk-bundle.jar" | sha1sum -c -
