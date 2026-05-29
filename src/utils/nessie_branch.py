@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -238,9 +239,12 @@ def _ensure_ref_has_history(ref_name: str) -> None:
 
     head_hash = _ref_hash(ref_name)
     commit_url = f"{_base_url()}/trees/{ref_name}@{head_hash}/history/commit"
-    payload = {
+    # Annotated as dict[str, Any] so requests' typed `json=` arg accepts the
+    # nested shape. Without the hint mypy narrows to
+    # `dict[str, Collection[Collection[str]]]` and rejects it against JsonType.
+    payload: dict[str, Any] = {
         "commitMeta": {
-            "message": ("bootstrap: plant initial commit so future merges resolve a common ancestor"),
+            "message": "bootstrap: plant initial commit so future merges resolve a common ancestor",
             "author": "data-lake-init",
         },
         "operations": [
