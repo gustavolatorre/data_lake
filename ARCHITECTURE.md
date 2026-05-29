@@ -45,12 +45,16 @@ containers (`minio-setup`, `dremio-setup`).
 | Layer | Path | Engine | Schema discipline | Idempotency |
 |-------|------|--------|-------------------|-------------|
 | Staging | `s3://staging/breweries/{date}/breweries_page_{N}.json` | Python + MinIO SDK | Raw JSON | Full overwrite per day |
-| Bronze | `nessie.bronze.breweries` (Iceberg v2) | Spark | Explicit `BREWERY_SCHEMA` | `writer.overwritePartitions()` keyed on `ingestion_date` |
+| Bronze | `nessie.bronze.breweries` (Iceberg v2) | Spark | Explicit `BREWERY_SCHEMA` + `ingestion_ts` for partition spec | `writer.overwritePartitions()` keyed on `days(ingestion_ts)` (hidden) |
 | Silver | `nessie.silver.breweries` (Iceberg v2) | Spark `MERGE INTO` | Trimmed analytical schema (10 cols) | Idempotent MERGE; soft-delete via `WHEN NOT MATCHED BY SOURCE` + 20% shrink guard |
 | Gold | `gold_dev.{dim_*, fact_*, mart_*}` (Dremio) | dbt-dremio | `schema.yml` per model | dbt incremental (`fact_breweries`) + tables/views; `dbt build` enforces test gates |
 
 ### Bronze guarantees
-- Append per execution date (partition = `ingestion_date`).
+- Hidden partitioning by `days(ingestion_ts)` (Iceberg transform). `ingestion_ts`
+  is derived from the Airflow `execution_date`, so re-runs land on the same
+  partition and `overwritePartitions()` stays idempotent. The lock-step
+  `ingestion_date` string is kept as a regular column for query / join
+  ergonomics; Silver filters by **both** to ensure Iceberg prunes correctly.
 - Cached before count-driven validations to avoid N rescans.
 - Schema enforcement on read: `spark.read.schema(BREWERY_SCHEMA).json(...)`.
 

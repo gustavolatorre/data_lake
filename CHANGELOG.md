@@ -15,6 +15,7 @@ this file is the public, summarized view.
 
 ### Changed
 - `Dockerfile.spark` now uses three explicit `WORKDIR` blocks instead of `RUN ... cd ...` for the from-source Python 3.12 build.
+- **Bronze partitioning** (P2.3) moved from `partitionedBy(ingestion_date)` (string) to **hidden** `partitionedBy(days(ingestion_ts))` (timestamp transform). New column `ingestion_ts` derived from `execution_date` keeps idempotency under `overwritePartitions()`. Silver dual-filters on both `ingestion_date` (back-compat) and `ingestion_ts` (gives Iceberg the predicate needed for partition pruning). Existing Bronze tables stay valid — but to migrate the partition spec retroactively, run `ALTER TABLE nessie.bronze.breweries DROP PARTITION FIELD ingestion_date; ALTER TABLE nessie.bronze.breweries ADD PARTITION FIELD days(ingestion_ts);` followed by a `CALL nessie.system.rewrite_data_files(...)`.
 
 ## [3.1.0] — 2026-05-28
 
