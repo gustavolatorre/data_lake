@@ -17,6 +17,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 from src.utils.data_quality import log_quality_summary
+from src.utils.quality_runner import run_quality_checks
 from src.utils.spark_session import create_spark_session
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,14 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
 
         # 6. Perform Atomic MERGE into Silver
         _execute_merge(spark)
+
+        # 7. Post-MERGE declarative quality contract for the Silver layer.
+        # Rules live in quality/checks/silver_breweries.yml; any FAIL-severity
+        # rule violation raises QualityCheckError, the SparkSubmit task fails,
+        # and `cleanup_branch` in the DAG drops the isolated Nessie branch so
+        # `main` never sees the corrupted state.
+        silver_df = spark.table("nessie.silver.breweries")
+        run_quality_checks(silver_df, checks_file="silver_breweries.yml")
     finally:
         transformed_df.unpersist()
 
