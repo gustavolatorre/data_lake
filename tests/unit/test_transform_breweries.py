@@ -465,3 +465,69 @@ class TestRunTransformQuarantineFlow:
         # No MERGE was issued
         merge_calls = [args[0] for args, _ in spark.sql.call_args_list if "MERGE" in str(args[0])]
         assert merge_calls == []
+
+
+class TestRunTransformSilverQualityContract:
+    """Silver declarative DQ contract runs after the MERGE on the happy path."""
+
+    @patch("src.silver.transform_breweries.run_quality_checks")
+    @patch("src.silver.transform_breweries._execute_merge")
+    @patch("src.silver.transform_breweries._assert_source_not_shrinking")
+    @patch("src.silver.transform_breweries._apply_native_transformations")
+    @patch("src.silver.transform_breweries._quarantine_invalid_records")
+    @patch("src.silver.transform_breweries.F")
+    def test_run_quality_checks_invoked_after_merge(
+        self,
+        _mock_f,
+        _mock_quarantine,
+        mock_apply,
+        _mock_shrink,
+        mock_merge,
+        mock_run_quality_checks,
+    ):
+        """Post-merge, the runner is called on the live Silver table.
+
+        The runner must receive the YAML filename `silver_breweries.yml`,
+        and the DataFrame argument must be the result of
+        ``spark.table('nessie.silver.breweries')`` — confirming the check
+        runs against the materialized Silver post-MERGE, not the in-memory
+        source view.
+        """
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+
+        # Bronze read chain: spark.table(bronze).filter(date).filter(ts) -> bronze_df
+        bronze_df = MagicMock(name="BronzeDF")
+        bronze_df.isEmpty.return_value = False
+        bad_df = MagicMock(name="BadDF")
+        bad_df.count.return_value = 0
+        good_df = MagicMock(name="GoodDF")
+        good_df.isEmpty.return_value = False  # happy path — MERGE will run
+        bronze_df.filter.side_effect = [bad_df, good_df]
+
+        transformed_df = MagicMock(name="TransformedDF")
+        mock_apply.return_value = transformed_df
+
+        # `silver_df` returned by spark.table('nessie.silver.breweries').
+        # Distinguish from the bronze chain by short-circuiting filter().
+        silver_post_merge_df = MagicMock(name="SilverPostMergeDF")
+
+        def _table_side_effect(name):
+            if name == "nessie.silver.breweries":
+                return silver_post_merge_df
+            # Bronze path: spark.table('nessie.bronze.breweries').filter().filter() -> bronze_df
+            bronze_chain = MagicMock()
+            bronze_chain.filter.return_value.filter.return_value = bronze_df
+            return bronze_chain
+
+        spark.table.side_effect = _table_side_effect
+
+        _run_transform(spark, "2026-04-29")
+
+        # MERGE happened (mocked, but call recorded)
+        mock_merge.assert_called_once_with(spark)
+        # Quality runner was called against the Silver table snapshot, not the source DF
+        mock_run_quality_checks.assert_called_once_with(
+            silver_post_merge_df,
+            checks_file="silver_breweries.yml",
+        )

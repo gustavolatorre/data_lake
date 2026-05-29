@@ -1,0 +1,90 @@
+# Declarative quality checks for the Silver layer.
+#
+# Loaded by src/utils/quality_runner.py AFTER the MERGE INTO completes. Each
+# rule runs a single Spark aggregation against `nessie.silver.breweries` as
+# it stands post-merge (i.e. the full Silver table — covering soft-deleted
+# rows too, because uniqueness and non-nullability of `id` must hold for
+# both active and inactive records).
+#
+# A violation of any fail-severity rule raises QualityCheckError, which
+# propagates up through `transform`, fails the SparkSubmit task, and the
+# Nessie branch wrapping this run gets dropped by `cleanup_branch` in the
+# DAG — `main` stays untouched.
+#
+# Schema (same contract as bronze_breweries.yml):
+#   name        : stable, human-readable identifier (required)
+#   type        : one of {row_count, missing_count, unique_count, missing_percent}
+#   column      : column the check applies to (omit for table-level checks)
+#   max         : integer threshold (e.g. missing_count: <= 0)
+#   min         : integer threshold (e.g. row_count: >= 1)
+#   max_percent : float in [0.0, 100.0] for missing_percent
+#   severity    : "fail" (default) or "warn"
+
+dataset: silver.breweries
+
+checks:
+  # Structural invariants — these MUST hold after every MERGE or the table
+  # is broken in a way Gold and dbt downstream cannot recover from.
+
+  - name: silver_must_not_be_empty
+    type: row_count
+    min: 1
+    severity: fail
+
+  - name: silver_id_no_nulls
+    # The MERGE key is `id`; a NULL id would mean either the quarantine
+    # sink stopped catching them or someone bypassed the quality gate.
+    type: missing_count
+    column: id
+    max: 0
+    severity: fail
+
+  - name: silver_id_unique
+    # The MERGE is ON t.id = s.id; duplicate ids in Silver would mean
+    # MERGE produced a non-deterministic result (race or bug). Treat as
+    # fatal — Gold's fact_breweries uses id as the surrogate seed.
+    type: unique_count
+    column: id
+    severity: fail
+
+  - name: silver_is_active_no_nulls
+    # `is_active` is a boolean populated by the MERGE on every row
+    # (INSERT path sets true, NOT MATCHED BY SOURCE sets false). NULL
+    # here would mean a code regression that silently broke the flag.
+    type: missing_count
+    column: is_active
+    max: 0
+    severity: fail
+
+  - name: silver_state_no_nulls
+    # `_apply_native_transformations` coalesces NULL state to the
+    # sentinel `__UNKNOWN__` before the MERGE, so post-merge there
+    # should be zero NULLs. If this rule trips, the transformation
+    # regressed.
+    type: missing_count
+    column: state
+    max: 0
+    severity: fail
+
+  # Soft signals — alert without aborting. These guard against gradual
+  # data-quality degradation upstream (the API starting to return more
+  # incomplete records), which the structural checks above would not
+  # detect.
+
+  - name: silver_name_rarely_missing
+    type: missing_percent
+    column: name
+    max_percent: 5.0
+    severity: warn
+
+  - name: silver_brewery_type_rarely_missing
+    type: missing_percent
+    column: brewery_type
+    max_percent: 5.0
+    severity: warn
+
+  - name: silver_country_rarely_missing
+    type: missing_percent
+    column: country
+    max_percent: 5.0
+    severity: warn
