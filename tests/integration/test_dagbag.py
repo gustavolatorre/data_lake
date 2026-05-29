@@ -35,13 +35,13 @@ from airflow.dag_processing.dagbag import DagBag  # noqa: E402
 
 DAGS_DIR = Path(__file__).resolve().parents[2] / "dags"
 
-EXPECTED_DAG_IDS = [
+EXPECTED_DAG_IDS = {
     "staging_breweries_ingestion",
     "bronze_silver_breweries_processing",
     "gold_dbt_breweries_processing",
     "iceberg_maintenance",
     "staging_brasileirao_ingestion",
-]
+}
 
 
 @pytest.fixture(scope="module")
