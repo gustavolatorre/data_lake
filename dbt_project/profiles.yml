@@ -20,7 +20,7 @@ data_lake_gold:
       type: dremio
       software_host: "{{ env_var('DREMIO_HOST', 'dremio') }}"
       port: "{{ env_var('DREMIO_PORT', '9047') | int }}"
-      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'false') | as_bool }}"
+      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'false') | lower == 'true' }}"
       user: "{{ env_var('DREMIO_ADMIN_USER') }}"
       password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
       space: "lakehouse"
@@ -32,7 +32,7 @@ data_lake_gold:
       type: dremio
       software_host: "{{ env_var('DREMIO_HOST') }}"
       port: "{{ env_var('DREMIO_PORT', '9047') | int }}"
-      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'true') | as_bool }}"
+      use_ssl: "{{ env_var('DREMIO_USE_SSL', 'true') | lower == 'true' }}"
       user: "{{ env_var('DREMIO_ADMIN_USER') }}"
       password: "{{ env_var('DREMIO_ADMIN_PASSWORD') }}"
       space: "lakehouse"
