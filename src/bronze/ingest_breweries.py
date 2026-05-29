@@ -81,13 +81,11 @@ def _run_ingest(
             ``file://`` path so the same code can drive a local
             Hadoop-catalog warehouse without S3A.
     """
-    # Read Staging JSON
     staging_path = f"{staging_path_base.rstrip('/')}/{execution_date}/"
     logger.info("Reading staging data from %s", staging_path)
 
     df = spark.read.schema(BREWERY_SCHEMA).option("multiline", "true").json(staging_path)
 
-    # Add ingestion metadata.
     # ingestion_date: stable string YYYY-MM-DD; used by Silver as a join key.
     # ingested_at:    real wall-clock — useful in forensics + dedup window.
     # ingestion_ts:   logical timestamp tied to execution_date — drives the
@@ -101,7 +99,6 @@ def _run_ingest(
     # Cache before quality checks + write — avoids 3x re-scan of the JSON in S3
     df.cache()
     try:
-        # Validate before writing — fail fast if staging produced no data
         check_row_count(df, min_rows=1)
         log_quality_summary(df, "bronze", critical_columns=["id", "name", "brewery_type"])
 
@@ -110,7 +107,6 @@ def _run_ingest(
         # rule violation raises QualityCheckError and aborts the run.
         run_quality_checks(df, checks_file="bronze_breweries.yml")
 
-        # Write to Iceberg Bronze
         # Idempotency: overwritePartitions() atomically replaces only the partitions
         # present in `df` (i.e. the current ingestion_date). Re-running the same
         # execution_date produces the same final state — no duplicates.

@@ -135,6 +135,41 @@ def bronze_silver_pipeline():
         logger.info("Merging Nessie branch '%s' back into main", name)
         _merge(name, target="main")
 
+    @task(task_id="check_quarantine", retries=2)
+    def check_quarantine(**context) -> None:
+        """Check if any quarantine alert was written for today's run and alert."""
+        from src.utils.minio_client import create_minio_client
+        from minio.error import S3Error
+        import json
+
+        execution_date = context.get("ds") or pendulum.now(local_tz).strftime("%Y-%m-%d")
+        client = create_minio_client()
+        object_name = f"breweries/{execution_date}/quarantine_alert.json"
+
+        try:
+            response = client.get_object("staging", object_name)
+            try:
+                data = json.loads(response.read().decode("utf-8"))
+                rows = data.get("quarantined_rows", 0)
+                reason = data.get("reason", "UNKNOWN")
+                if rows > 0:
+                    logger.error(
+                        "SILVER QUARANTINE ALERT | execution_date=%s | quarantined_rows=%d | reason=%s | "
+                        "Critical: Invalid rows were diverted to quarantine table (nessie.silver.breweries_quarantine) "
+                        "due to NULL primary key. Active SecOps/QA investigation required.",
+                        execution_date,
+                        rows,
+                        reason,
+                    )
+            finally:
+                response.close()
+                response.release_conn()
+        except S3Error as e:
+            if e.code == "NoSuchKey":
+                logger.info("No quarantine alerts found for %s (happy path: 100%% clean data)", execution_date)
+            else:
+                logger.exception("Failed to check quarantine alert status in MinIO")
+
     @task(
         task_id="cleanup_branch",
         trigger_rule=TriggerRule.ONE_FAILED,
@@ -155,12 +190,15 @@ def bronze_silver_pipeline():
 
     merge = merge_branch()
     cleanup = cleanup_branch()
+    check_quar = check_quarantine()
 
     # Wiring:
     #   create_branch -> bronze -> silver -> merge
-    #                                   \-> cleanup (only if anything before merge failed)
+    #                                   └-> check_quarantine
+    #                                   \-> cleanup (only if anything before merge/check failed)
     branch_name >> staging_to_bronze >> bronze_to_silver >> merge
-    [staging_to_bronze, bronze_to_silver, merge] >> cleanup
+    bronze_to_silver >> check_quar
+    [staging_to_bronze, bronze_to_silver, merge, check_quar] >> cleanup
 
 
 # Instanciar a pipeline
