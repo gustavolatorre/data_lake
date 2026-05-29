@@ -1,0 +1,4 @@
+checks for nessie.bronze.brasileirao:
+  # The Bronze layer is "as is", so we do not enforce column-level completeness.
+  # We only ensure that the dataframe is not completely empty.
+  - row_count > 0

@@ -41,6 +41,7 @@ EXPECTED_DAG_IDS = {
     "gold_dbt_breweries_processing",
     "iceberg_maintenance",
     "staging_brasileirao_ingestion",
+    "bronze_silver_brasileirao_processing",
 }
 
 

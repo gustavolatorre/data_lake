@@ -32,6 +32,11 @@ EXPECTED_DAGS = {
         "pipeline_func": "bronze_silver_breweries_pipeline",
         "asset_uri": "iceberg://nessie/silver/breweries",
     },
+    "bronze_silver_brasileirao_processing.py": {
+        "dag_id": "bronze_silver_brasileirao_processing",
+        "pipeline_func": "bronze_silver_brasileirao_pipeline",
+        "asset_uri": "iceberg://nessie/silver/brasileirao",
+    },
     "gold_dbt_breweries_processing.py": {
         "dag_id": "gold_dbt_breweries_processing",
         "pipeline_func": "gold_dbt_breweries_pipeline",
