@@ -17,8 +17,8 @@ does).
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 # Mock fcntl for Windows environment to allow Airflow import

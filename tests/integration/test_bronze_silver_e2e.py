@@ -49,6 +49,7 @@ def reset_catalog(spark: SparkSession) -> None:
             # Best-effort — quarantine table may not exist in every test
             pass
 
+
 # Minimal fixture set covering the dimensions the pipeline really cares about:
 # - 2 valid rows (id present)
 # - 1 quarantine candidate (id is NULL)
