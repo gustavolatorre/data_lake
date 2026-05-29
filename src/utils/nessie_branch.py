@@ -152,9 +152,21 @@ def drop_branch(name: str) -> None:
 def merge_branch(source: str, *, target: str = "main") -> None:
     """Merge ``source`` into ``target``.
 
-    On success ``target`` advances; on conflict the API returns 409 and we
-    raise :class:`NessieAPIError` — the caller is responsible for deciding
-    whether to fail the run or rebase.
+    Uses ``defaultKeyMergeMode=FORCE`` because our ETL pattern treats the
+    source (an isolated ``etl_*`` branch) as the source-of-truth for the
+    keys it touched. ``NORMAL`` is the conservative default and refuses
+    the second consecutive merge with ``REFERENCE_CONFLICT`` ("the
+    following keys have been changed in conflict: …") — Nessie flags any
+    historical overlap on the same key, even when ``target`` hasn't
+    moved since the previous merge. ``overwritePartitions`` (Bronze) and
+    ``MERGE INTO`` (Silver) already guarantee per-day idempotency, so
+    taking the source's version is what we actually want.
+
+    Raises:
+        NessieAPIError: On any non-2xx response. Genuine 409 conflicts
+            (a true 3-way data conflict that even FORCE can't reconcile)
+            still surface as ``NessieAPIError`` — caller decides whether
+            to fail the run or rebase.
     """
     _validate_branch_name(source)
     _validate_branch_name(target)
@@ -171,7 +183,7 @@ def merge_branch(source: str, *, target: str = "main") -> None:
     payload = {
         "fromRefName": source,
         "fromHash": src_hash,
-        "defaultKeyMergeMode": "NORMAL",
+        "defaultKeyMergeMode": "FORCE",
     }
     with _session() as s:
         resp = s.post(url, json=payload, timeout=_HTTP_TIMEOUT_SECONDS)
