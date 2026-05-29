@@ -9,6 +9,7 @@ authors = [{ name = "Gustavo La Torre" }]
 
 dependencies = [
     "pyspark==4.0.0",
+    "pyspark-client==4.0.0",
     "pydantic-settings>=2.14.1",
     "minio>=7.2.0",
     "requests>=2.31.0",

@@ -31,13 +31,10 @@ SPARK_CONF = {
     "spark.executor.instances": "1",
 }
 
-# Retain ~30 days of snapshots on production tables. This balances storage
-# overhead against the ability to roll back / time-travel for incident response.
-SNAPSHOT_RETENTION_DAYS = 30
-# Keep at least this many recent snapshots even if all are within the retention
-# window. Belt-and-suspenders so a sudden flurry of writes can't expire history
-# we might still need.
-MIN_SNAPSHOTS_TO_KEEP = 5
+# Default snapshot retention settings. These values are used as fallback defaults
+# in the Jinja templates, which pull dynamically from Airflow Variables:
+#   * iceberg_snapshot_retention_days (default: 30)
+#   * iceberg_min_snapshots_to_keep (default: 5)
 
 # Dedicated Airflow pool with slots=1. Maintenance and the daily Bronze/Silver
 # pipeline both submit to the same single-executor Spark worker (2g RAM); if
@@ -86,9 +83,9 @@ def iceberg_maintenance_pipeline():
         application="/opt/airflow/src/maintenance/iceberg_maintenance.py",
         application_args=[
             "--retention-days",
-            str(SNAPSHOT_RETENTION_DAYS),
+            "{{ var.value.get('iceberg_snapshot_retention_days', '30') }}",
             "--min-snapshots",
-            str(MIN_SNAPSHOTS_TO_KEEP),
+            "{{ var.value.get('iceberg_min_snapshots_to_keep', '5') }}",
         ],
         conf=SPARK_CONF,
         execution_timeout=timedelta(minutes=45),

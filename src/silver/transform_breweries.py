@@ -62,7 +62,6 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
         spark: Active SparkSession.
         execution_date: Date string (YYYY-MM-DD).
     """
-    # 1. Read the latest snapshot from Bronze (filtered by execution_date)
     logger.info("Reading Bronze data for ingestion_date=%s", execution_date)
 
     # We read the specific partition to ensure we are only processing the latest arrival.
@@ -101,6 +100,29 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
     if bad_count > 0:
         logger.warning("Quarantining %d row(s) with NULL id", bad_count)
         _quarantine_invalid_records(spark, bad_df, REASON_NULL_ID, execution_date)
+
+        # Write a status file in MinIO staging bucket for downstream alerting (M1.2)
+        try:
+            import io
+            import json
+
+            from src.utils.minio_client import create_minio_client
+
+            client = create_minio_client()
+            alert_payload = {"quarantined_rows": bad_count, "reason": REASON_NULL_ID, "execution_date": execution_date}
+            json_bytes = json.dumps(alert_payload, ensure_ascii=False, indent=2).encode("utf-8")
+            file_obj = io.BytesIO(json_bytes)
+            object_name = f"breweries/{execution_date}/quarantine_alert.json"
+            client.put_object(
+                bucket_name="staging",
+                object_name=object_name,
+                data=file_obj,
+                length=len(json_bytes),
+                content_type="application/json",
+            )
+            logger.info("Quarantine alert status written to MinIO: %s", object_name)
+        except Exception as e:
+            logger.error("Failed to write quarantine alert status to MinIO: %s", e)
     else:
         logger.info("No NULL-id rows to quarantine for %s", execution_date)
 
@@ -108,7 +130,6 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
         logger.warning("All rows for %s were quarantined; nothing to MERGE", execution_date)
         return
 
-    # 3. Apply transformations on the clean subset only (No UDFs!)
     transformed_df = _apply_native_transformations(good_df)
 
     # Cache the transformed DF before the chain of count-driven steps below
@@ -125,10 +146,7 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
         # 4. Guard rail — protect against partial fetch silently soft-deleting rows
         _assert_source_not_shrinking(spark, transformed_df)
 
-        # 5. Create a temporary view for the MERGE operation
         transformed_df.createOrReplaceTempView("v_transformed_breweries")
-
-        # 6. Perform Atomic MERGE into Silver
         _execute_merge(spark)
 
         # 7. Post-MERGE declarative quality contract for the Silver layer.

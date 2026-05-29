@@ -14,6 +14,39 @@ MINIO_SECRET_KEY="${MINIO_ROOT_PASSWORD:-password}"
 MAX_RETRIES=40
 RETRY_INTERVAL=10
 
+echo ">>> [Dremio Setup] Aguardando serviços dependentes (MinIO e Nessie)..."
+
+# ── Aguardando MinIO ──────────────────────────────────────────────────────────
+for i in $(seq 1 $MAX_RETRIES); do
+  MINIO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://minio:9000/minio/health/ready")
+  if [ "$MINIO_STATUS" = "200" ]; then
+    echo ">>> [Dremio Setup] MinIO está pronto!"
+    break
+  fi
+  echo ">>> [Dremio Setup] MinIO não está pronto ($i/$MAX_RETRIES). Aguardando ${RETRY_INTERVAL}s..."
+  sleep $RETRY_INTERVAL
+  if [ "$i" = "$MAX_RETRIES" ]; then
+    echo ">>> [Dremio Setup] ERRO: MinIO não iniciou a tempo. Abortando."
+    exit 1
+  fi
+done
+
+# ── Aguardando Nessie ─────────────────────────────────────────────────────────
+for i in $(seq 1 $MAX_RETRIES); do
+  NESSIE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${NESSIE_ENDPOINT}/config")
+  if [ "$NESSIE_STATUS" = "200" ]; then
+    echo ">>> [Dremio Setup] Nessie está pronto!"
+    break
+  fi
+  echo ">>> [Dremio Setup] Nessie não está pronto ($i/$MAX_RETRIES). Aguardando ${RETRY_INTERVAL}s..."
+  sleep $RETRY_INTERVAL
+  if [ "$i" = "$MAX_RETRIES" ]; then
+    echo ">>> [Dremio Setup] ERRO: Nessie não iniciou a tempo. Abortando."
+    exit 1
+  fi
+done
+
+# ── Aguardando Dremio ─────────────────────────────────────────────────────────
 echo ">>> [Dremio Setup] Aguardando Dremio inicializar..."
 
 for i in $(seq 1 $MAX_RETRIES); do
