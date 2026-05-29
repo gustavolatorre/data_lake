@@ -33,6 +33,23 @@ def mock_settings():
         minio_root_user="ak",
         minio_root_password="sk",
         nessie_uri="http://nessie:19120/api/v2",
+        # OpenLineage disabled by default in the shared fixture; per-test
+        # fixtures below override `openlineage_url` to flip it on.
+        openlineage_url="",
+        openlineage_namespace="data_lake",
+    )
+
+
+@pytest.fixture
+def mock_settings_with_openlineage():
+    """Same as mock_settings but with the OpenLineage HTTP transport enabled."""
+    return MagicMock(
+        minio_endpoint="minio:9000",
+        minio_root_user="ak",
+        minio_root_password="sk",
+        nessie_uri="http://nessie:19120/api/v2",
+        openlineage_url="http://marquez:5000",
+        openlineage_namespace="data_lake",
     )
 
 
@@ -105,6 +122,45 @@ def test_configures_s3a_credentials_from_settings(mock_get_settings, mock_spark_
     assert configs.get("spark.hadoop.fs.s3a.access.key") == "ak"
     assert configs.get("spark.hadoop.fs.s3a.secret.key") == "sk"
     assert configs.get("spark.hadoop.fs.s3a.path.style.access") == "true"
+
+
+@patch("src.utils.spark_session.SparkSession")
+@patch("src.utils.spark_session.get_settings")
+def test_openlineage_listener_always_registered(mock_get_settings, mock_spark_cls, builder, mock_settings):
+    """Listener class is registered even when transport is off — only the URL is conditional."""
+    builder_mock, _ = builder
+    mock_spark_cls.builder = builder_mock
+    mock_get_settings.return_value = mock_settings  # openlineage_url=""
+
+    create_spark_session("test")
+
+    configs = _collected_configs(builder_mock)
+    assert configs.get("spark.extraListeners") == "io.openlineage.spark.agent.OpenLineageSparkListener"
+    assert configs.get("spark.openlineage.namespace") == "data_lake"
+    # Transport configs should NOT be set when URL is empty.
+    assert "spark.openlineage.transport.type" not in configs
+    assert "spark.openlineage.transport.url" not in configs
+
+
+@patch("src.utils.spark_session.SparkSession")
+@patch("src.utils.spark_session.get_settings")
+def test_openlineage_transport_set_when_url_present(
+    mock_get_settings,
+    mock_spark_cls,
+    builder,
+    mock_settings_with_openlineage,
+):
+    """When openlineage_url is set, transport.type/url/appName are wired."""
+    builder_mock, _ = builder
+    mock_spark_cls.builder = builder_mock
+    mock_get_settings.return_value = mock_settings_with_openlineage
+
+    create_spark_session("BreweriesStagingToBronze")
+
+    configs = _collected_configs(builder_mock)
+    assert configs.get("spark.openlineage.transport.type") == "http"
+    assert configs.get("spark.openlineage.transport.url") == "http://marquez:5000"
+    assert configs.get("spark.openlineage.appName") == "BreweriesStagingToBronze"
 
 
 @patch("src.utils.spark_session.SparkSession")
