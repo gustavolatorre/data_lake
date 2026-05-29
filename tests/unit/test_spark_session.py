@@ -31,7 +31,7 @@ def mock_settings():
     return MagicMock(
         minio_endpoint="minio:9000",
         minio_root_user="ak",
-        minio_root_password="sk",
+        minio_root_password="sk",  # pragma: allowlist secret
         nessie_uri="http://nessie:19120/api/v2",
         # OpenLineage disabled by default in the shared fixture; per-test
         # fixtures below override `openlineage_url` to flip it on.
@@ -46,7 +46,7 @@ def mock_settings_with_openlineage():
     return MagicMock(
         minio_endpoint="minio:9000",
         minio_root_user="ak",
-        minio_root_password="sk",
+        minio_root_password="sk",  # pragma: allowlist secret
         nessie_uri="http://nessie:19120/api/v2",
         openlineage_url="http://marquez:5000",
         openlineage_namespace="data_lake",
@@ -126,8 +126,15 @@ def test_configures_s3a_credentials_from_settings(mock_get_settings, mock_spark_
 
 @patch("src.utils.spark_session.SparkSession")
 @patch("src.utils.spark_session.get_settings")
-def test_openlineage_listener_always_registered(mock_get_settings, mock_spark_cls, builder, mock_settings):
-    """Listener class is registered even when transport is off — only the URL is conditional."""
+def test_openlineage_not_registered_when_url_empty(mock_get_settings, mock_spark_cls, builder, mock_settings):
+    """When transport URL is unset, the listener is NOT registered at all.
+
+    Registering ``spark.extraListeners`` without the JAR on the driver's
+    classpath crashes the Spark driver with ``ClassNotFoundException``;
+    the Airflow scheduler container that runs the driver in client mode
+    doesn't carry the OpenLineage JAR. So an empty ``OPENLINEAGE_URL``
+    means: do nothing.
+    """
     builder_mock, _ = builder
     mock_spark_cls.builder = builder_mock
     mock_get_settings.return_value = mock_settings  # openlineage_url=""
@@ -135,9 +142,8 @@ def test_openlineage_listener_always_registered(mock_get_settings, mock_spark_cl
     create_spark_session("test")
 
     configs = _collected_configs(builder_mock)
-    assert configs.get("spark.extraListeners") == "io.openlineage.spark.agent.OpenLineageSparkListener"
-    assert configs.get("spark.openlineage.namespace") == "data_lake"
-    # Transport configs should NOT be set when URL is empty.
+    assert "spark.extraListeners" not in configs
+    assert "spark.openlineage.namespace" not in configs
     assert "spark.openlineage.transport.type" not in configs
     assert "spark.openlineage.transport.url" not in configs
 
@@ -158,6 +164,8 @@ def test_openlineage_transport_set_when_url_present(
     create_spark_session("BreweriesStagingToBronze")
 
     configs = _collected_configs(builder_mock)
+    assert configs.get("spark.extraListeners") == "io.openlineage.spark.agent.OpenLineageSparkListener"
+    assert configs.get("spark.openlineage.namespace") == "data_lake"
     assert configs.get("spark.openlineage.transport.type") == "http"
     assert configs.get("spark.openlineage.transport.url") == "http://marquez:5000"
     assert configs.get("spark.openlineage.appName") == "BreweriesStagingToBronze"

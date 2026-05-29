@@ -98,9 +98,16 @@ def _apply_openlineage_config(builder, settings: Settings, app_name: str):
     """Attach OpenLineage Spark listener configs to the builder.
 
     The listener JAR (``openlineage-spark_2.13``) is bundled in the Spark
-    image. We always register the listener class — it's harmless without
-    transport, just logs locally — but we only set ``spark.openlineage.*``
-    transport config when ``settings.openlineage_url`` is non-empty.
+    cluster image (master + workers) but **not** in the Airflow scheduler
+    container where ``spark-submit`` runs the driver in client mode. So
+    registering ``spark.extraListeners`` unconditionally would crash the
+    driver with ``ClassNotFoundException`` whenever the JAR isn't reachable
+    from the driver's classpath.
+
+    We treat ``OPENLINEAGE_URL`` as the opt-in switch: if it's set, the user
+    wants lineage and is responsible for making the JAR available on the
+    driver (e.g. via ``--jars`` or by mounting it). If it's empty (the
+    current default) we don't register the listener at all — silent no-op.
 
     Args:
         builder: SparkSession.Builder being configured.
@@ -112,19 +119,17 @@ def _apply_openlineage_config(builder, settings: Settings, app_name: str):
     Returns:
         The builder, mutated in place (chain-friendly).
     """
-    builder = builder.config("spark.extraListeners", _OPENLINEAGE_LISTENER_CLASS).config(
-        "spark.openlineage.namespace", settings.openlineage_namespace
-    )
-
     if not settings.openlineage_url:
         logger.info(
-            "OpenLineage listener loaded for '%s' (transport disabled — set OPENLINEAGE_URL to enable)",
+            "OpenLineage disabled for '%s' (set OPENLINEAGE_URL to enable — listener will not be registered)",
             app_name,
         )
         return builder
 
     builder = (
-        builder.config("spark.openlineage.transport.type", "http")
+        builder.config("spark.extraListeners", _OPENLINEAGE_LISTENER_CLASS)
+        .config("spark.openlineage.namespace", settings.openlineage_namespace)
+        .config("spark.openlineage.transport.type", "http")
         .config("spark.openlineage.transport.url", settings.openlineage_url)
         # Identify the job in lineage graphs by the same name Airflow uses.
         .config("spark.openlineage.appName", app_name)

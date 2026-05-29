@@ -57,18 +57,36 @@ class TestRunMaintenance:
     @patch("src.maintenance.iceberg_maintenance.create_spark_session")
     def test_processes_every_configured_table(self, mock_create):
         mock_spark = MagicMock()
+        mock_spark.catalog.tableExists.return_value = True
         mock_create.return_value = mock_spark
 
         run_maintenance(retention_days=30, min_snapshots=5)
 
-        # 3 procedures × number of tables
-        expected_calls = 3 * len(MAINTAINED_TABLES)
+        # 4 SQL procedures per table: enable_gc + rewrite + expire + orphan.
+        expected_calls = 4 * len(MAINTAINED_TABLES)
         assert mock_spark.sql.call_count == expected_calls
+        mock_spark.stop.assert_called_once()
+
+    @patch("src.maintenance.iceberg_maintenance.create_spark_session")
+    def test_skips_missing_tables(self, mock_create):
+        """Tables not yet created (e.g. quarantine) should be silently skipped.
+
+        Otherwise the weekly DAG would go red until the first row gets
+        quarantined.
+        """
+        mock_spark = MagicMock()
+        mock_spark.catalog.tableExists.return_value = False
+        mock_create.return_value = mock_spark
+
+        run_maintenance(retention_days=30, min_snapshots=5)
+
+        assert mock_spark.sql.call_count == 0
         mock_spark.stop.assert_called_once()
 
     @patch("src.maintenance.iceberg_maintenance.create_spark_session")
     def test_stops_spark_on_failure(self, mock_create):
         mock_spark = MagicMock()
+        mock_spark.catalog.tableExists.return_value = True
         mock_spark.sql.side_effect = RuntimeError("compaction crashed")
         mock_create.return_value = mock_spark
 
