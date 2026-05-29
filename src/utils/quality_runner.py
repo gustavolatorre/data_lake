@@ -37,8 +37,10 @@ from pyspark.sql import functions as F
 
 logger = logging.getLogger(__name__)
 
-# Where the YAML rules live inside the container. Mirrors the repo layout.
-DEFAULT_CHECKS_DIR = Path("/opt/airflow/quality/checks")
+# Dynamically resolve quality checks directory relative to codebase root.
+# Works in production container (/opt/airflow/quality/checks), local env, and CI.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CHECKS_DIR = _PROJECT_ROOT / "quality" / "checks"
 
 # Severity tags used in YAML.
 SEVERITY_FAIL = "fail"
