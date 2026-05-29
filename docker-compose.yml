@@ -66,7 +66,7 @@ services:
     # jobs that execute code with access to ./src and ./jobs volumes.
     # Airflow submits via the internal Docker network (conn_id=spark_docker).
     ports:
-      - "9090:8080" # Spark UI
+      - "127.0.0.1:9090:8080" # Spark UI (bound to loopback only)
     expose:
       - "7077" # Spark master port (intra-network only)
     healthcheck:
@@ -159,7 +159,7 @@ services:
     command: bash -c "python /opt/airflow/scripts/generate_auth_file.py && airflow api-server"
     restart: always
     ports:
-      - "8080:8080" # Airflow UI
+      - "127.0.0.1:8080:8080" # Airflow UI (bound to loopback only)
     depends_on:
       - scheduler
     healthcheck:
@@ -178,8 +178,8 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_DOMAIN: minio
     ports:
-      - "9001:9001" # MinIO Console
-      - "9000:9000" # MinIO API
+      - "127.0.0.1:9001:9001" # MinIO Console (bound to loopback only)
+      - "127.0.0.1:9000:9000" # MinIO API (bound to loopback only)
     command: [ "server", "/data", "--console-address", ":9001" ]
     volumes:
       - minio-data:/data
@@ -220,8 +220,8 @@ services:
     image: dremio/dremio-oss:25.0.0
     container_name: dremio
     ports:
-      - "9047:9047" # Dremio UI
-      - "31010:31010" # Dremio JDBC
+      - "127.0.0.1:9047:9047" # Dremio UI (bound to loopback only)
+      - "127.0.0.1:31010:31010" # Dremio JDBC (bound to loopback only)
     environment:
       - DREMIO_JAVA_EXTRA_OPTS=-Xss4M
     volumes:
