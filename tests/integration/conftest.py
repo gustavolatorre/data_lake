@@ -65,6 +65,18 @@ from pyspark.sql import SparkSession
 
 
 @pytest.fixture(scope="session", autouse=True)
+def mock_minio_client_for_integration():
+    """Mock the MinIO client globally for integration tests to prevent connection attempts."""
+    from unittest.mock import MagicMock, patch
+
+    mock_client = MagicMock()
+    # We patch create_minio_client in the utils module as well as directly in transform_breweries
+    with patch("src.utils.minio_client.create_minio_client", return_value=mock_client), \
+         patch("src.silver.transform_breweries.create_minio_client", return_value=mock_client):
+        yield mock_client
+
+
+@pytest.fixture(scope="session", autouse=True)
 def init_airflow_db(tmp_path_factory) -> None:
     """Initialize Airflow SQLite database for integration tests."""
     airflow_home = tmp_path_factory.mktemp("airflow_home")

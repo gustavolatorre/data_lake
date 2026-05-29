@@ -138,9 +138,11 @@ def bronze_silver_pipeline():
     @task(task_id="check_quarantine", retries=2)
     def check_quarantine(**context) -> None:
         """Check if any quarantine alert was written for today's run and alert."""
-        from src.utils.minio_client import create_minio_client
-        from minio.error import S3Error
         import json
+
+        from minio.error import S3Error
+
+        from src.utils.minio_client import create_minio_client
 
         execution_date = context.get("ds") or pendulum.now(local_tz).strftime("%Y-%m-%d")
         client = create_minio_client()

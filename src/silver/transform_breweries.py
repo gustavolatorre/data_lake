@@ -100,18 +100,16 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
     if bad_count > 0:
         logger.warning("Quarantining %d row(s) with NULL id", bad_count)
         _quarantine_invalid_records(spark, bad_df, REASON_NULL_ID, execution_date)
-        
+
         # Write a status file in MinIO staging bucket for downstream alerting (M1.2)
         try:
-            from src.utils.minio_client import create_minio_client
             import io
             import json
+
+            from src.utils.minio_client import create_minio_client
+
             client = create_minio_client()
-            alert_payload = {
-                "quarantined_rows": bad_count,
-                "reason": REASON_NULL_ID,
-                "execution_date": execution_date
-            }
+            alert_payload = {"quarantined_rows": bad_count, "reason": REASON_NULL_ID, "execution_date": execution_date}
             json_bytes = json.dumps(alert_payload, ensure_ascii=False, indent=2).encode("utf-8")
             file_obj = io.BytesIO(json_bytes)
             object_name = f"breweries/{execution_date}/quarantine_alert.json"
@@ -120,7 +118,7 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
                 object_name=object_name,
                 data=file_obj,
                 length=len(json_bytes),
-                content_type="application/json"
+                content_type="application/json",
             )
             logger.info("Quarantine alert status written to MinIO: %s", object_name)
         except Exception as e:
