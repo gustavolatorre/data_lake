@@ -106,15 +106,18 @@ def create_branch(name: str, *, source_ref: str = "main") -> None:
         logger.warning("Nessie branch '%s' already exists — reusing it", name)
         return
 
-    # v2 spec: POST /trees with body { "name", "type": "BRANCH", "sourceRefName" }
-    # We hit GET on source to grab its hash, then POST with that hash so the
-    # branch points at exactly the same commit we observed.
+    # v2 spec: POST /trees?name=<branch>&type=BRANCH with body = the source
+    # Reference (its own type + hash). The first attempt at this passed name
+    # and type in the body and got "createReference.type: must not be null"
+    # back — they're query params in v2, not body fields.
     src_hash = _ref_hash(source_ref)
 
     url = f"{_base_url()}/trees"
-    payload = {"name": name, "type": "BRANCH", "hash": src_hash, "sourceRefName": source_ref}
+    query = {"name": name, "type": "BRANCH"}
+    # Body shape per Reference schema: { "type": "BRANCH", "name": "<src>", "hash": "<hash>" }
+    payload = {"type": "BRANCH", "name": source_ref, "hash": src_hash}
     with _session() as s:
-        resp = s.post(url, json=payload, timeout=_HTTP_TIMEOUT_SECONDS)
+        resp = s.post(url, params=query, json=payload, timeout=_HTTP_TIMEOUT_SECONDS)
     _raise_for_status(resp, f"create branch '{name}' from '{source_ref}'")
     logger.info("Created Nessie branch '%s' off '%s' (hash=%s)", name, source_ref, src_hash[:8])
 
