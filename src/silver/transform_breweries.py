@@ -196,7 +196,10 @@ def _quarantine_invalid_records(
             )
             USING iceberg
             PARTITIONED BY (quarantine_date)
-            TBLPROPERTIES ('format-version'='2')
+            TBLPROPERTIES (
+                'format-version'='2',
+                'gc.enabled'='true'
+            )
         """)
 
     # Append-only; we want history. Idempotency is via re-running on a fresh
@@ -317,7 +320,10 @@ def _execute_merge(spark: SparkSession) -> None:
             )
             USING iceberg
             PARTITIONED BY (state)
-            TBLPROPERTIES ('format-version'='2')
+            TBLPROPERTIES (
+                'format-version'='2',
+                'gc.enabled'='true'
+            )
         """)
 
     spark.sql("""

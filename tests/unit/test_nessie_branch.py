@@ -64,6 +64,16 @@ class TestNameValidation:
 # ---------------------------------------------------------------------------
 
 
+def _mock_main_history_nonempty() -> None:
+    """Pretend ``main`` already has at least one commit so the P3.12 bootstrap path is skipped."""
+    responses.add(
+        responses.GET,
+        "http://nessie:19120/api/v2/trees/main/history",
+        json={"logEntries": [{"commitMeta": {"hash": "real_commit", "message": "init"}}]},
+        status=200,
+    )
+
+
 class TestCreateBranch:
     @responses.activate
     def test_creates_when_missing(self, fake_settings):
@@ -74,6 +84,8 @@ class TestCreateBranch:
             json={"reference": {"type": "BRANCH", "hash": "abc"}},
             status=404,
         )
+        # P3.12: source already has commit history -> bootstrap path skipped.
+        _mock_main_history_nonempty()
         # GET source to resolve hash
         responses.add(
             responses.GET,
@@ -113,7 +125,8 @@ class TestCreateBranch:
 
         create_branch("etl_existing", source_ref="main")
 
-        # No POST was issued.
+        # No POST was issued — and crucially the bootstrap path didn't run
+        # either, because we short-circuit before checking source ref state.
         assert all(c.request.method != "POST" for c in responses.calls)
 
     @responses.activate
@@ -125,6 +138,7 @@ class TestCreateBranch:
             json={},
             status=404,
         )
+        _mock_main_history_nonempty()
         # GET source hash 200
         responses.add(
             responses.GET,
@@ -142,6 +156,71 @@ class TestCreateBranch:
 
         with pytest.raises(NessieAPIError, match="status=500"):
             create_branch("etl_x", source_ref="main")
+
+    @responses.activate
+    def test_bootstraps_main_when_history_is_empty(self, fake_settings):
+        """P3.12 — if ``main`` has zero commits, plant a bootstrap commit before branching.
+
+        Otherwise the subsequent merge_branch back into main fails with
+        REFERENCE_NOT_FOUND ("no common ancestor"). This test pins the
+        contract: a new branch creation against an empty ref must trigger
+        one bootstrap POST on main's history, then proceed normally.
+        """
+        # branch_exists -> 404 (etl branch doesn't exist yet)
+        responses.add(
+            responses.GET,
+            "http://nessie:19120/api/v2/trees/etl_x_2026_04_29",
+            json={},
+            status=404,
+        )
+        # main history is EMPTY -> bootstrap path triggers
+        responses.add(
+            responses.GET,
+            "http://nessie:19120/api/v2/trees/main/history",
+            json={"logEntries": []},
+            status=200,
+        )
+        # _ensure_ref_has_history fetches main head to obtain the expected-hash
+        responses.add(
+            responses.GET,
+            "http://nessie:19120/api/v2/trees/main",
+            json={"reference": {"type": "BRANCH", "hash": "EMPTY_HEAD"}},
+            status=200,
+        )
+        # bootstrap commit on main
+        responses.add(
+            responses.POST,
+            "http://nessie:19120/api/v2/trees/main@EMPTY_HEAD/history/commit",
+            json={"targetBranch": {"type": "BRANCH", "name": "main", "hash": "POST_BOOTSTRAP_HEAD"}},
+            status=200,
+        )
+        # _ref_hash for the source ref AFTER bootstrap (fresh main head)
+        responses.add(
+            responses.GET,
+            "http://nessie:19120/api/v2/trees/main",
+            json={"reference": {"type": "BRANCH", "hash": "POST_BOOTSTRAP_HEAD"}},
+            status=200,
+        )
+        # create_branch POST itself
+        responses.add(
+            responses.POST,
+            "http://nessie:19120/api/v2/trees",
+            json={"reference": {"type": "BRANCH", "name": "etl_x_2026_04_29", "hash": "etl_h"}},
+            status=200,
+        )
+
+        create_branch("etl_x_2026_04_29", source_ref="main")
+
+        # We expect exactly two POSTs in order: bootstrap commit on main, then branch creation.
+        posts = [c for c in responses.calls if c.request.method == "POST"]
+        assert len(posts) == 2
+        assert "main@EMPTY_HEAD/history/commit" in posts[0].request.url
+        assert "/trees?name=etl_x_2026_04_29" in posts[1].request.url
+        # Bootstrap body carries the placeholder namespace and a recognisable author.
+        bootstrap_body = posts[0].request.body.decode()
+        assert "bootstrap" in bootstrap_body
+        assert "NAMESPACE" in bootstrap_body
+        assert "data-lake-init" in bootstrap_body
 
 
 # ---------------------------------------------------------------------------

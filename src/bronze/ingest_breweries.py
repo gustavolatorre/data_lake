@@ -123,7 +123,16 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
         # `ingested_at` because the latter is wall-clock; re-running the same
         # execution_date on a different real day would otherwise land in a
         # different partition and break overwritePartitions() idempotency.
-        writer = df.writeTo(table_name).tableProperty("format-version", "2").partitionedBy(days(F.col("ingestion_ts")))
+        # P3.13 — `gc.enabled=true` lets `iceberg_maintenance` run
+        # `expire_snapshots` / `remove_orphan_files` without the defensive
+        # ALTER TABLE pre-step. Iceberg defaults this to false as a guard
+        # against shared catalogs; we own these tables exclusively.
+        writer = (
+            df.writeTo(table_name)
+            .tableProperty("format-version", "2")
+            .tableProperty("gc.enabled", "true")
+            .partitionedBy(days(F.col("ingestion_ts")))
+        )
 
         if spark.catalog.tableExists(table_name):
             logger.info("Table %s exists. Overwriting partition for ingestion_date.", table_name)

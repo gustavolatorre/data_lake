@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -105,6 +106,15 @@ def create_branch(name: str, *, source_ref: str = "main") -> None:
     if branch_exists(name):
         logger.warning("Nessie branch '%s' already exists — reusing it", name)
         return
+
+    # P3.12 — make sure source_ref has at least one real commit. A freshly
+    # provisioned Nessie has main at the NO_ANCESTOR sentinel hash; merging an
+    # etl branch back into that state fails with REFERENCE_NOT_FOUND ("no
+    # common ancestor in parents of …") because the sentinel isn't a walkable
+    # commit. Planting a placeholder commit here is idempotent and means
+    # `make down -v && make up` produces a stack the DAG can drive end-to-end
+    # without manual setup.
+    _ensure_ref_has_history(source_ref)
 
     # v2 spec: POST /trees?name=<branch>&type=BRANCH with body = the source
     # Reference (its own type + hash). The first attempt at this passed name
@@ -197,6 +207,58 @@ def _ref_hash(name: str) -> str:
         msg = f"Nessie response for '{name}' missing 'hash' field: {data!r}"
         raise NessieAPIError(msg)
     return str(h)
+
+
+def _ensure_ref_has_history(ref_name: str) -> None:
+    """Plant a no-op bootstrap commit on ``ref_name`` if its commit log is empty.
+
+    Why this exists: a freshly created Nessie ref points at the ``NO_ANCESTOR``
+    sentinel hash. Branching off that state and committing on the new branch is
+    fine, but **merging back** fails with ``REFERENCE_NOT_FOUND`` ("no common
+    ancestor in parents of …") because the sentinel isn't a walkable commit —
+    the merge algorithm walks parents of both refs and finds no overlap.
+
+    We detect "empty" by asking for one history record and seeing none. If so
+    we POST a single ``CREATE NAMESPACE`` op so the ref now has a real commit
+    that any future etl branch will descend from.
+
+    Idempotent on retry: re-running this once the bootstrap is in place is a
+    cheap GET-and-skip.
+
+    Args:
+        ref_name: Branch (or tag) to inspect/bootstrap. In practice this is
+            always ``main``; we accept the arg so callers can opt in
+            explicitly and tests can target other refs.
+    """
+    history_url = f"{_base_url()}/trees/{ref_name}/history?maxRecords=1"
+    with _session() as s:
+        resp = s.get(history_url, timeout=_HTTP_TIMEOUT_SECONDS)
+    _raise_for_status(resp, f"check history of '{ref_name}'")
+    if resp.json().get("logEntries"):
+        return  # ref already has at least one commit; nothing to do.
+
+    head_hash = _ref_hash(ref_name)
+    commit_url = f"{_base_url()}/trees/{ref_name}@{head_hash}/history/commit"
+    # Annotated as dict[str, Any] so requests' typed `json=` arg accepts the
+    # nested shape. Without the hint mypy narrows to
+    # `dict[str, Collection[Collection[str]]]` and rejects it against JsonType.
+    payload: dict[str, Any] = {
+        "commitMeta": {
+            "message": "bootstrap: plant initial commit so future merges resolve a common ancestor",
+            "author": "data-lake-init",
+        },
+        "operations": [
+            {
+                "type": "PUT",
+                "key": {"elements": ["bootstrap"]},
+                "content": {"type": "NAMESPACE", "elements": ["bootstrap"]},
+            }
+        ],
+    }
+    with _session() as s:
+        resp = s.post(commit_url, json=payload, timeout=_HTTP_TIMEOUT_SECONDS)
+    _raise_for_status(resp, f"bootstrap commit on '{ref_name}'")
+    logger.info("Planted bootstrap commit on Nessie ref '%s'", ref_name)
 
 
 def _raise_for_status(resp: requests.Response, what: str) -> None:
