@@ -65,15 +65,24 @@ def ingest(execution_date: str, nessie_ref: str = "main") -> None:
         logger.info("SparkSession stopped")
 
 
-def _run_ingest(spark: SparkSession, execution_date: str) -> None:
+def _run_ingest(
+    spark: SparkSession,
+    execution_date: str,
+    *,
+    staging_path_base: str = "s3a://staging/breweries",
+) -> None:
     """Internal ingestion logic.
 
     Args:
         spark: Active SparkSession.
         execution_date: Date string (YYYY-MM-DD).
+        staging_path_base: Base URI for the staging area. Defaults to the
+            MinIO bucket used in production; integration tests pass a
+            ``file://`` path so the same code can drive a local
+            Hadoop-catalog warehouse without S3A.
     """
     # Read Staging JSON
-    staging_path = f"s3a://staging/breweries/{execution_date}/"
+    staging_path = f"{staging_path_base.rstrip('/')}/{execution_date}/"
     logger.info("Reading staging data from %s", staging_path)
 
     df = spark.read.schema(BREWERY_SCHEMA).option("multiline", "true").json(staging_path)
