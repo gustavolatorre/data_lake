@@ -41,9 +41,17 @@ ARG NESSIE_VERSION=0.107.5
 ARG HADOOP_AWS_VERSION=3.4.1
 ARG AWS_SDK_V2_VERSION=2.24.6
 
-RUN curl -fSL "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.0_2.13/${ICEBERG_VERSION}/iceberg-spark-runtime-4.0_2.13-${ICEBERG_VERSION}.jar" \
-        -o ${PYSPARK_JARS}/iceberg-spark-runtime.jar && \
-    curl -fSL "https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" \
-        -o ${PYSPARK_JARS}/hadoop-aws.jar && \
-    curl -fSL "https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar" \
-        -o ${PYSPARK_JARS}/aws-java-sdk-bundle.jar
+# Each JAR is verified against its .sha512 fetched from the same Maven Central
+# path, so a tampered mirror or DNS-poisoned download fails the build instead
+# of silently shipping a malicious classpath. Versions MUST match Dockerfile.spark.
+RUN set -eu && \
+    MAVEN="https://repo1.maven.org/maven2" && \
+    ICEBERG_URL="${MAVEN}/org/apache/iceberg/iceberg-spark-runtime-4.0_2.13/${ICEBERG_VERSION}/iceberg-spark-runtime-4.0_2.13-${ICEBERG_VERSION}.jar" && \
+    curl -fSL "${ICEBERG_URL}" -o "${PYSPARK_JARS}/iceberg-spark-runtime.jar" && \
+    echo "$(curl -fsSL ${ICEBERG_URL}.sha512)  ${PYSPARK_JARS}/iceberg-spark-runtime.jar" | sha512sum -c - && \
+    HADOOP_AWS_URL="${MAVEN}/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" && \
+    curl -fSL "${HADOOP_AWS_URL}" -o "${PYSPARK_JARS}/hadoop-aws.jar" && \
+    echo "$(curl -fsSL ${HADOOP_AWS_URL}.sha512)  ${PYSPARK_JARS}/hadoop-aws.jar" | sha512sum -c - && \
+    AWS_SDK_URL="${MAVEN}/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar" && \
+    curl -fSL "${AWS_SDK_URL}" -o "${PYSPARK_JARS}/aws-java-sdk-bundle.jar" && \
+    echo "$(curl -fsSL ${AWS_SDK_URL}.sha512)  ${PYSPARK_JARS}/aws-java-sdk-bundle.jar" | sha512sum -c -
