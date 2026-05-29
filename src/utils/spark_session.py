@@ -80,7 +80,7 @@ def create_spark_session(app_name: str) -> SparkSession:
         )
     )
     builder = _apply_openlineage_config(builder, settings, app_name)
-    session = builder.getOrCreate()
+    session: SparkSession = builder.getOrCreate()
 
     logger.info("SparkSession '%s' created successfully", app_name)
     return session
