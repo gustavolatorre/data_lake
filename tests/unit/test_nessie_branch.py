@@ -92,10 +92,14 @@ class TestCreateBranch:
         create_branch("etl_x_2026_04_29", source_ref="main")
 
         post_call = next(c for c in responses.calls if c.request.method == "POST")
+        # Nessie v2: new branch name + type go in the query string.
+        assert "name=etl_x_2026_04_29" in post_call.request.url
+        assert "type=BRANCH" in post_call.request.url
+        # Body carries the source Reference (its own type + hash).
         body = post_call.request.body.decode()
         assert "BRANCH" in body
         assert "mainHASH" in body
-        assert "main" in body  # sourceRefName
+        assert "main" in body  # source ref name in the Reference body
 
     @responses.activate
     def test_is_noop_when_branch_exists(self, fake_settings, caplog):
