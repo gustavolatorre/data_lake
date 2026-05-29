@@ -1,0 +1,46 @@
+# Declarative quality checks for the Bronze layer.
+#
+# Loaded by src/utils/quality_runner.py before the Iceberg append. Each rule
+# runs a single Spark aggregation; a violation aborts the run (matching the
+# pre-existing check_row_count behaviour). Stable rule names — downstream
+# dashboards filter on them.
+#
+# Schema:
+#   name        : stable, human-readable identifier (required)
+#   type        : one of {row_count, missing_count, unique_count, missing_percent}
+#   column      : column the check applies to (omit for table-level checks)
+#   max         : integer threshold (e.g. missing_count: <= 0)
+#   min         : integer threshold (e.g. row_count: >= 1)
+#   max_percent : float in [0.0, 100.0] for missing_percent
+#   severity    : "fail" (default) or "warn"
+
+dataset: bronze.breweries
+
+checks:
+  - name: bronze_must_not_be_empty
+    type: row_count
+    min: 1
+    severity: fail
+
+  - name: bronze_id_no_nulls
+    type: missing_count
+    column: id
+    max: 0
+    severity: fail
+
+  - name: bronze_id_unique_per_partition
+    type: unique_count
+    column: id
+    severity: fail
+
+  - name: bronze_name_rarely_missing
+    type: missing_percent
+    column: name
+    max_percent: 5.0
+    severity: warn
+
+  - name: bronze_brewery_type_rarely_missing
+    type: missing_percent
+    column: brewery_type
+    max_percent: 5.0
+    severity: warn
