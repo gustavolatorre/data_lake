@@ -48,11 +48,12 @@ def _enable_gc(spark: SparkSession, table: str) -> None:
     """Allow ``expire_snapshots`` + ``remove_orphan_files`` to delete files.
 
     Iceberg defaults ``gc.enabled`` to ``false`` as a safety guard against
-    shared/external metadata (e.g. another engine pointing at the same
-    files). We own these tables exclusively, so we flip the switch
-    idempotently before any GC procedure runs.
+    shared/external metadata. We own these tables exclusively. After P3.13
+    new tables are created with ``gc.enabled=true`` directly in DDL, so this
+    call is a no-op for those — but we keep it as a defensive net for any
+    pre-P3.13 table that's already in the warehouse and never got the flag.
     """
-    logger.info("Enabling GC on %s (gc.enabled=true)", table)
+    logger.info("Ensuring GC enabled on %s (gc.enabled=true)", table)
     spark.sql(f"ALTER TABLE {table} SET TBLPROPERTIES ('gc.enabled'='true')")
 
 
