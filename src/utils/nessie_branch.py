@@ -174,7 +174,7 @@ def branch_exists(name: str) -> bool:
     data = resp.json()
     # v2 response wraps the reference under "reference".
     ref = data.get("reference") or data
-    return ref.get("type") == "BRANCH"
+    return bool(ref.get("type") == "BRANCH")
 
 
 def _ref_hash(name: str) -> str:
@@ -189,7 +189,7 @@ def _ref_hash(name: str) -> str:
     if not h:
         msg = f"Nessie response for '{name}' missing 'hash' field: {data!r}"
         raise NessieAPIError(msg)
-    return h
+    return str(h)
 
 
 def _raise_for_status(resp: requests.Response, what: str) -> None:
