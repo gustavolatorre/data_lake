@@ -136,7 +136,15 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.airflow
-    command: bash -c "python /opt/airflow/scripts/generate_auth_file.py && airflow db migrate && airflow scheduler"
+    # `airflow pools set` is idempotent (insert-or-update), so re-running on
+    # container restart never errors. The maintenance_pool with slots=1
+    # isolates iceberg_maintenance from the daily Bronze/Silver pool on the
+    # single 2GB Spark worker. See dags/iceberg_maintenance.py for context.
+    command: >-
+      bash -c "python /opt/airflow/scripts/generate_auth_file.py
+      && airflow db migrate
+      && airflow pools set maintenance_pool 1 'Isolated pool for Iceberg compaction/expire/orphan-cleanup'
+      && airflow scheduler"
     restart: always
     depends_on:
       postgres:
