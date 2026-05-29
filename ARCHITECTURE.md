@@ -113,6 +113,28 @@ Iceberg `format-version=2` everywhere. v3 was attempted (P1.15) but Dremio
 | Quarantine split (`id IS NULL`) | Silver Spark job | Diverts bad rows to `breweries_quarantine` instead of aborting |
 | `dbt build` tests (`unique`, `not_null`, `relationships`, `freshness`) | Gold Airflow task | Cross-layer integrity |
 
+## 5b. Observability — OpenLineage (P3.6)
+
+Two emitters are wired by default; both are inert until a collector URL is
+configured, so the bundled images "just work" with no external dependency.
+
+| Emitter | Source | Triggered by |
+|---------|--------|--------------|
+| Airflow provider | `apache-airflow-providers-openlineage` (image-baked) | every task instance |
+| Spark listener | `openlineage-spark_2.13` JAR + `spark.extraListeners` in `create_spark_session` | every Spark action |
+
+**Configuration:**
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `OPENLINEAGE_URL` | empty | Empty = listener loads but only logs; non-empty (e.g. `http://marquez:5000`) flips to HTTP transmit |
+| `OPENLINEAGE_NAMESPACE` | `data_lake` | Groups events from this project across pipelines / Spark apps |
+| `AIRFLOW__OPENLINEAGE__NAMESPACE` | `data_lake` | Same, but for the Airflow provider scope |
+
+**Why empty-by-default:** keeps the smoke test reproducible (no external
+service to fail), and surfaces lineage in logs as a learning aid. Point at
+Marquez / Datadog / any OpenLineage-compatible collector when you're ready.
+
 ## 6. Credentials & secrets
 
 Local development only. Three categories:

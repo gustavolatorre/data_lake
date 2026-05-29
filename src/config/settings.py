@@ -71,6 +71,8 @@ class Settings(BaseSettings):
         api_base_url: OpenBreweryDB API base URL.
         api_per_page: Number of records per API page.
         api_timeout_seconds: HTTP request timeout in seconds.
+        openlineage_url: OpenLineage collector HTTP endpoint (empty disables).
+        openlineage_namespace: OpenLineage namespace tag for emitted events.
     """
 
     model_config = SettingsConfigDict(
@@ -100,6 +102,15 @@ class Settings(BaseSettings):
     api_base_url: str = "https://api.openbrewerydb.org/v1/breweries"
     api_per_page: int = 50
     api_timeout_seconds: int = 15
+
+    # OpenLineage (P3.6) — observability of pipeline runs.
+    # `openlineage_url` empty (default) means "do not phone home" — the Spark
+    # listener is still loaded but only logs to stderr. Setting a value (e.g.
+    # http://marquez:5000) flips it into transmit mode without any code change.
+    # `openlineage_namespace` groups lineage events from this project together
+    # across multiple pipelines and Spark applications.
+    openlineage_url: str = ""
+    openlineage_namespace: str = "data_lake"
 
     @field_validator("minio_root_password")
     @classmethod

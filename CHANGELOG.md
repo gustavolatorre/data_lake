@@ -9,6 +9,8 @@ this file is the public, summarized view.
 
 ### Added
 - **CI hardening (Wave E)**: `WORKDIR` refactor in `Dockerfile.spark` to satisfy Trivy DS-0013; `ARCHITECTURE.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`.
+- **Quarantine sink** (P3.8): rows with `id IS NULL` go to `nessie.silver.breweries_quarantine` (append-only, partitioned by `quarantine_date`) instead of aborting the run. Added to `iceberg_maintenance` weekly job.
+- **OpenLineage** (P3.6): Airflow provider + Spark listener registered by default. Empty `OPENLINEAGE_URL` = log-only mode (no external dependency). Set `OPENLINEAGE_URL=http://marquez:5000` to transmit.
 
 ### Changed
 - `Dockerfile.spark` now uses three explicit `WORKDIR` blocks instead of `RUN ... cd ...` for the from-source Python 3.12 build.

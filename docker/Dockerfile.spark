@@ -51,12 +51,18 @@ ARG ICEBERG_VERSION=1.11.0
 ARG NESSIE_VERSION=0.107.5
 ARG HADOOP_AWS_VERSION=3.4.1
 ARG AWS_SDK_V2_VERSION=2.24.6
+# OpenLineage Spark listener — emits lineage events for every Spark action.
+# When OPENLINEAGE_URL is empty (default) the listener is loaded but only
+# logs; it does not phone home anywhere.
+ARG OPENLINEAGE_VERSION=1.24.2
 
 RUN curl -fSL "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.0_2.13/${ICEBERG_VERSION}/iceberg-spark-runtime-4.0_2.13-${ICEBERG_VERSION}.jar" \
         -o /opt/spark/jars/iceberg-spark-runtime.jar && \
     curl -fSL "https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_AWS_VERSION}/hadoop-aws-${HADOOP_AWS_VERSION}.jar" \
         -o /opt/spark/jars/hadoop-aws.jar && \
     curl -fSL "https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar" \
-        -o /opt/spark/jars/aws-java-sdk-bundle.jar
+        -o /opt/spark/jars/aws-java-sdk-bundle.jar && \
+    curl -fSL "https://repo1.maven.org/maven2/io/openlineage/openlineage-spark_2.13/${OPENLINEAGE_VERSION}/openlineage-spark_2.13-${OPENLINEAGE_VERSION}.jar" \
+        -o /opt/spark/jars/openlineage-spark.jar
 
 USER spark
