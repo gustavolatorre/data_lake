@@ -36,13 +36,16 @@ class SourceShrinkError(RuntimeError):
     """Raised when today's source count is suspiciously smaller than yesterday's."""
 
 
-def transform(execution_date: str) -> None:
+def transform(execution_date: str, nessie_ref: str = "main") -> None:
     """Execute the Bronze → Silver transformation.
 
     Args:
         execution_date: Date string (YYYY-MM-DD) for the Bronze partition to process.
+        nessie_ref: Nessie branch (or tag/hash) the Spark session should bind
+            to. P3.1 — Bronze/Silver DAGs pass an isolated ``etl_*`` branch so
+            failures don't pollute ``main``.
     """
-    spark = create_spark_session("BreweriesBronzeToSilver")
+    spark = create_spark_session("BreweriesBronzeToSilver", nessie_ref=nessie_ref)
 
     try:
         _run_transform(spark, execution_date)
@@ -344,12 +347,19 @@ def _execute_merge(spark: SparkSession) -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
     from src.utils.logging_config import setup_logging
 
     setup_logging()
 
-    if len(sys.argv) < 2:
-        logger.error("Usage: transform_breweries.py <execution_date>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Bronze -> Silver transformation")
+    parser.add_argument("execution_date", help="YYYY-MM-DD (matches the Airflow logical date)")
+    parser.add_argument(
+        "--nessie-ref",
+        default="main",
+        help="Nessie branch / tag / hash to bind the catalog to (default: main)",
+    )
+    args = parser.parse_args(sys.argv[1:])
 
-    transform(sys.argv[1])
+    transform(args.execution_date, nessie_ref=args.nessie_ref)
