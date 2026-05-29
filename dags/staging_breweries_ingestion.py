@@ -18,11 +18,11 @@ local_tz = pendulum.timezone("America/Sao_Paulo")
 # Definindo o Asset reativo de saída
 staging_breweries_raw = Asset("s3://staging/breweries")
 
-on_failure_callback = build_failure_callback("STAGING INGESTION")
+on_failure_callback = build_failure_callback("STAGING BREWERIES INGESTION")
 
 
 @dag(
-    dag_id="staging_ingestion",
+    dag_id="staging_breweries_ingestion",
     description="Ingestion layer: OpenBreweryDB API → MinIO Staging",
     schedule="@daily",
     start_date=pendulum.datetime(2024, 1, 1, tz=local_tz),
@@ -38,7 +38,7 @@ on_failure_callback = build_failure_callback("STAGING INGESTION")
     },
     tags=["brewery", "staging", "ingestion"],
 )
-def staging_ingestion_pipeline():
+def staging_breweries_pipeline():
     """Ingest brewery data from API and emit staging_breweries_raw asset."""
 
     @task(outlets=[staging_breweries_raw])
@@ -63,4 +63,4 @@ def staging_ingestion_pipeline():
 
 
 # Instanciar a pipeline de ingestão
-staging_ingestion_pipeline()
+staging_breweries_pipeline()

@@ -1,4 +1,4 @@
-"""Airflow 3.2.1 DAG — Bronze & Silver Processing with Nessie branching (P3.1).
+"""Airflow 3.2.1 DAG — Bronze & Silver Processing with Nessie branching.
 
 Triggers when the staging_breweries_raw asset is updated. Lifecycle:
 
@@ -54,17 +54,17 @@ EXECUTION_DATE_TEMPLATE = (
 
 # Templated branch name — matches `nessie_branch.build_branch_name`.
 NESSIE_BRANCH_TEMPLATE = (
-    "etl_bronze_silver_{{ (dag_run.logical_date.strftime('%Y-%m-%d') "
+    "etl_bronze_silver_breweries_{{ (dag_run.logical_date.strftime('%Y-%m-%d') "
     "if (dag_run is defined and dag_run.logical_date is not none) "
     "else macros.datetime.now().strftime('%Y-%m-%d'))"
     ".replace('-', '_') }}"
 )
 
-on_failure_callback = build_failure_callback("BRONZE/SILVER PROCESSING")
+on_failure_callback = build_failure_callback("BRONZE/SILVER BREWERIES PROCESSING")
 
 
 @dag(
-    dag_id="bronze_silver_processing",
+    dag_id="bronze_silver_breweries_processing",
     description="Processing layer with Nessie branch isolation: Staging → Bronze → Silver → MERGE",
     schedule=staging_breweries_raw,  # Agendamento reativo por Asset
     start_date=pendulum.datetime(2024, 1, 1, tz=local_tz),
@@ -80,7 +80,7 @@ on_failure_callback = build_failure_callback("BRONZE/SILVER PROCESSING")
     },
     tags=["brewery", "bronze", "silver", "iceberg", "nessie-branching"],
 )
-def bronze_silver_pipeline():
+def bronze_silver_breweries_pipeline():
     """Branch-isolated Bronze/Silver pipeline.
 
     Each run carves out its own Nessie branch, fans out the Spark jobs on
@@ -95,7 +95,7 @@ def bronze_silver_pipeline():
         from src.utils.nessie_branch import create_branch as _create
 
         execution_date = context.get("ds") or pendulum.now(local_tz).strftime("%Y-%m-%d")
-        name = build_branch_name(dag_id="bronze_silver", execution_date=execution_date)
+        name = build_branch_name(dag_id="bronze_silver_breweries", execution_date=execution_date)
         logger.info("Creating isolated Nessie branch '%s'", name)
         _create(name, source_ref="main")
         return name
@@ -131,7 +131,7 @@ def bronze_silver_pipeline():
         from src.utils.nessie_branch import merge_branch as _merge
 
         execution_date = context.get("ds") or pendulum.now(local_tz).strftime("%Y-%m-%d")
-        name = build_branch_name(dag_id="bronze_silver", execution_date=execution_date)
+        name = build_branch_name(dag_id="bronze_silver_breweries", execution_date=execution_date)
         logger.info("Merging Nessie branch '%s' back into main", name)
         _merge(name, target="main")
 
@@ -186,7 +186,7 @@ def bronze_silver_pipeline():
         from src.utils.nessie_branch import build_branch_name, drop_branch
 
         execution_date = context.get("ds") or pendulum.now(local_tz).strftime("%Y-%m-%d")
-        name = build_branch_name(dag_id="bronze_silver", execution_date=execution_date)
+        name = build_branch_name(dag_id="bronze_silver_breweries", execution_date=execution_date)
         logger.warning("Upstream failed — dropping orphan Nessie branch '%s'", name)
         drop_branch(name)
 
@@ -204,4 +204,4 @@ def bronze_silver_pipeline():
 
 
 # Instanciar a pipeline
-bronze_silver_pipeline()
+bronze_silver_breweries_pipeline()

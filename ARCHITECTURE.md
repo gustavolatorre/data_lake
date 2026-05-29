@@ -83,9 +83,9 @@ Three reactive (asset-aware) DAGs + one weekly maintenance DAG:
 
 | DAG | Schedule | Outlets | Inlets |
 |-----|----------|---------|--------|
-| `staging_ingestion` | `@daily` | `s3://staging/breweries` | — |
-| `bronze_silver_processing` | asset `s3://staging/breweries` | `iceberg://nessie/silver/breweries` (emitted by `merge_branch`) | (asset) |
-| `gold_dbt_processing` | asset `iceberg://nessie/silver/breweries` | `iceberg://nessie/gold/breweries` | (asset) |
+| `staging_breweries_ingestion` | `@daily` | `s3://staging/breweries` | — |
+| `bronze_silver_breweries_processing` | asset `s3://staging/breweries` | `iceberg://nessie/silver/breweries` (emitted by `merge_branch`) | (asset) |
+| `gold_dbt_breweries_processing` | asset `iceberg://nessie/silver/breweries` | `iceberg://nessie/gold/breweries` | (asset) |
 | `iceberg_maintenance` | `@weekly` | — | — |
 
 Failure callbacks: shared factory in `dags/callbacks.py`
@@ -97,8 +97,8 @@ plugin `on_load`.
 
 ## 4. Catalog / version control
 
-Project Nessie is the Iceberg catalog. **Each `bronze_silver_processing`
-DAG run carves out its own Nessie branch** (P3.1) before any Spark write
+Project Nessie is the- **Isolated Git-like branching for Bronze and Silver**. Every Bronze/Silver
+  DAG run carves out its own Nessie branch** before any Spark write
 and merges it back into `main` only after the Silver MERGE succeeds.
 
 ```
@@ -185,7 +185,7 @@ Bootstrap helper: `make init-secrets` copies `airflow.env.example` to
 | `dbt build` runtime error on seed load with VARCHAR/COLLATE | Non-ASCII char in `brewery_type_mapping.csv` (lesson from PR #18) |
 | `Failed to load plugin spark_connection_plugin` | You're on a pre-PR#17 image; rebuild — plugin was removed in favor of `AIRFLOW_CONN_*` |
 | `dremio-setup` crash-loop with `syntax error: unexpected word` | CRLF line endings in `setup_sources.sh` (Windows checkout without `.gitattributes` LF coercion). Fix: re-clone or `git rm --cached -r . && git reset --hard` |
-| Silver MERGE refuses with `SourceShrinkError` | Today's API fetch was partial. Investigate `staging_ingestion` task logs before clearing |
+| Silver MERGE refuses with `SourceShrinkError` | Today's API fetch was partial. Investigate `staging_breweries_ingestion` task logs before clearing |
 | Rows missing from Silver but present in Bronze | Check `nessie.silver.breweries_quarantine WHERE quarantine_date = '<date>'` — they probably failed `id IS NULL` |
 
 ## 8. Roadmap pointer
