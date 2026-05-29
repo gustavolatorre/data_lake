@@ -20,18 +20,22 @@ logger = logging.getLogger(__name__)
 _OPENLINEAGE_LISTENER_CLASS = "io.openlineage.spark.agent.OpenLineageSparkListener"
 
 
-def create_spark_session(app_name: str) -> SparkSession:
+def create_spark_session(app_name: str, *, nessie_ref: str = "main") -> SparkSession:
     """Create a SparkSession configured for Iceberg + Nessie + MinIO.
 
     The session is configured with:
     - Iceberg Spark extensions for DDL/DML support
-    - Nessie REST catalog (type=rest) for Git-like table versioning
+    - Nessie REST catalog pinned to ``nessie_ref`` (Git-like branching)
     - S3A filesystem for MinIO object storage access
     - KryoSerializer for optimized serialization
     - OpenLineage listener (always loaded; transmits when configured)
 
     Args:
         app_name: Name of the Spark application (visible in Spark UI).
+        nessie_ref: Which Nessie branch / tag / hash this session should
+            read and write through. Defaults to ``main`` for backward
+            compatibility; the Bronze/Silver DAG passes an isolated
+            ``etl_*`` branch name when P3.1 branching is active.
 
     Returns:
         SparkSession: A fully configured Spark session.
@@ -41,7 +45,11 @@ def create_spark_session(app_name: str) -> SparkSession:
     """
     settings = get_settings()
 
-    logger.info("Creating SparkSession '%s' with Iceberg + Nessie catalog", app_name)
+    logger.info(
+        "Creating SparkSession '%s' with Iceberg + Nessie catalog (ref=%s)",
+        app_name,
+        nessie_ref,
+    )
 
     builder = (
         SparkSession.builder.appName(app_name)
@@ -60,7 +68,7 @@ def create_spark_session(app_name: str) -> SparkSession:
             "org.apache.iceberg.nessie.NessieCatalog",
         )
         .config("spark.sql.catalog.nessie.uri", settings.nessie_uri)
-        .config("spark.sql.catalog.nessie.ref", "main")
+        .config("spark.sql.catalog.nessie.ref", nessie_ref)
         .config(
             "spark.sql.catalog.nessie.io-impl",
             "org.apache.iceberg.hadoop.HadoopFileIO",

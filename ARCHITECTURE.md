@@ -84,7 +84,7 @@ Three reactive (asset-aware) DAGs + one weekly maintenance DAG:
 | DAG | Schedule | Outlets | Inlets |
 |-----|----------|---------|--------|
 | `staging_ingestion` | `@daily` | `s3://staging/breweries` | — |
-| `bronze_silver_processing` | asset `s3://staging/breweries` | `iceberg://nessie/silver/breweries` | (asset) |
+| `bronze_silver_processing` | asset `s3://staging/breweries` | `iceberg://nessie/silver/breweries` (emitted by `merge_branch`) | (asset) |
 | `gold_dbt_processing` | asset `iceberg://nessie/silver/breweries` | `iceberg://nessie/gold/breweries` | (asset) |
 | `iceberg_maintenance` | `@weekly` | — | — |
 
@@ -97,9 +97,32 @@ plugin `on_load`.
 
 ## 4. Catalog / version control
 
-Project Nessie is the Iceberg catalog. The pipeline currently uses a single
-`main` branch — Nessie branching for isolated transformations + zero-copy
-rollback is on the roadmap (P3.1).
+Project Nessie is the Iceberg catalog. **Each `bronze_silver_processing`
+DAG run carves out its own Nessie branch** (P3.1) before any Spark write
+and merges it back into `main` only after the Silver MERGE succeeds.
+
+```
+main ───────────────────────────────────────●─────▶ (Gold reads here)
+                                            ▲
+                                            │ merge_branch (success path)
+            create_branch                   │
+main ──●────────── etl_bronze_silver_<date> ─┘
+       └──────▶  staging_to_bronze ▶ bronze_to_silver ▶ merge_branch
+                                          │
+                                          ▼ on any failure
+                                    cleanup_branch
+                                    (drops the branch — main untouched)
+```
+
+`src/utils/nessie_branch.py` hits the Nessie v2 REST API directly (no
+`nessie-spark-extensions` JAR needed). Branch names are deterministic
+(`etl_bronze_silver_YYYY_MM_DD`) so re-runs are idempotent: the second
+attempt re-uses the existing branch instead of failing.
+
+`create_spark_session(app_name, nessie_ref=...)` binds the catalog to a
+specific ref; both `ingest_breweries.py` and `transform_breweries.py`
+accept a `--nessie-ref` CLI flag that the DAG fills in from a Jinja
+template. Gold (dbt-dremio) continues to read `main`.
 
 Iceberg `format-version=2` everywhere. v3 was attempted (P1.15) but Dremio
 25.0.0 cannot read it; will revisit when Dremio adds support.

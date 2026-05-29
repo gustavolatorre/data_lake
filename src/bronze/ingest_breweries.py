@@ -44,7 +44,7 @@ BREWERY_SCHEMA = StructType(
 )
 
 
-def ingest(execution_date: str) -> None:
+def ingest(execution_date: str, nessie_ref: str = "main") -> None:
     """Execute the Staging → Bronze ingestion.
 
     Reads JSON from staging, adds metadata columns, and writes idempotently
@@ -52,8 +52,11 @@ def ingest(execution_date: str) -> None:
 
     Args:
         execution_date: Date string (YYYY-MM-DD) for the staging partition to read.
+        nessie_ref: Nessie branch (or tag/hash) the Spark session should bind
+            to. P3.1 — Bronze/Silver DAGs pass an isolated ``etl_*`` branch so
+            failures don't pollute ``main``.
     """
-    spark = create_spark_session("BreweriesStagingToBronze")
+    spark = create_spark_session("BreweriesStagingToBronze", nessie_ref=nessie_ref)
 
     try:
         _run_ingest(spark, execution_date)
@@ -136,12 +139,19 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
     from src.utils.logging_config import setup_logging
 
     setup_logging()
 
-    if len(sys.argv) < 2:
-        logger.error("Usage: ingest_to_bronze.py <execution_date>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Staging -> Bronze ingestion")
+    parser.add_argument("execution_date", help="YYYY-MM-DD (matches the Airflow logical date)")
+    parser.add_argument(
+        "--nessie-ref",
+        default="main",
+        help="Nessie branch / tag / hash to bind the catalog to (default: main)",
+    )
+    args = parser.parse_args(sys.argv[1:])
 
-    ingest(sys.argv[1])
+    ingest(args.execution_date, nessie_ref=args.nessie_ref)
