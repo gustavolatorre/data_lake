@@ -18,6 +18,12 @@ does).
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+from unittest.mock import MagicMock
+
+# Mock fcntl for Windows environment to allow Airflow import
+if sys.platform == "win32":
+    sys.modules["fcntl"] = MagicMock()
 
 import pytest
 
@@ -25,7 +31,7 @@ import pytest
 # to discover under the lean unit-test job, which doesn't install the
 # ``airflow`` extra.
 airflow = pytest.importorskip("airflow")  # noqa: F841
-from airflow.models.dagbag import DagBag  # noqa: E402
+from airflow.dag_processing.dagbag import DagBag  # noqa: E402
 
 DAGS_DIR = Path(__file__).resolve().parents[2] / "dags"
 
@@ -71,12 +77,12 @@ def test_every_expected_dag_is_registered(dagbag: DagBag) -> None:
 def test_dag_has_tasks_and_no_cycles(dagbag: DagBag, dag_id: str) -> None:
     """Each DAG has tasks and the topology is acyclic.
 
-    ``DagBag`` calls ``DAG.test_cycle()`` on load, but only at parse time
+    ``DagBag`` calls ``DAG.check_cycle()`` on load, but only at parse time
     of the decorator. An explicit per-DAG check pins the contract here too.
     """
     dag = dagbag.get_dag(dag_id)
     assert dag is not None, f"{dag_id} did not register"
     assert len(dag.tasks) > 0, f"{dag_id} has no tasks"
-    # In Airflow 3 ``test_cycle`` raises rather than returns bool when a
+    # In Airflow 3 ``check_cycle`` raises rather than returns bool when a
     # cycle exists; presence-only check is enough here.
-    dag.test_cycle()
+    dag.check_cycle()

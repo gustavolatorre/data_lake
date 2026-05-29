@@ -30,6 +30,25 @@ if TYPE_CHECKING:
 
 EXECUTION_DATE = "2026-01-15"
 
+
+@pytest.fixture(autouse=True)
+def reset_catalog(spark: SparkSession) -> None:
+    """Drop bronze + silver namespaces between tests for isolation.
+
+    Each test gets a clean slate. Without this, table state from one test
+    leaks into the next (Iceberg's ``overwritePartitions`` + ``MERGE``
+    are intentionally stateful).
+    """
+    yield
+    for namespace in ("bronze", "silver"):
+        try:
+            spark.sql(f"DROP TABLE IF EXISTS nessie.{namespace}.breweries PURGE")
+            spark.sql(f"DROP TABLE IF EXISTS nessie.{namespace}.breweries_quarantine PURGE")
+            spark.sql(f"DROP NAMESPACE IF EXISTS nessie.{namespace}")
+        except Exception:
+            # Best-effort — quarantine table may not exist in every test
+            pass
+
 # Minimal fixture set covering the dimensions the pipeline really cares about:
 # - 2 valid rows (id present)
 # - 1 quarantine candidate (id is NULL)

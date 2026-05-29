@@ -16,14 +16,58 @@ the runtime + downloading the JAR.
 
 from __future__ import annotations
 
+import os
 import shutil
-from typing import TYPE_CHECKING
+import sys
+from unittest.mock import MagicMock
+
+# Mock fcntl and Unix signals for Windows environment to allow Airflow import
+if sys.platform == "win32":
+    sys.modules["fcntl"] = MagicMock()
+    import signal
+    if not hasattr(signal, "SIGALRM"):
+        signal.SIGALRM = 14
+    if not hasattr(signal, "setitimer"):
+        signal.setitimer = lambda *args, **kwargs: None
+    if not hasattr(signal, "ITIMER_REAL"):
+        signal.ITIMER_REAL = 0
+    if not hasattr(signal, "alarm"):
+        signal.alarm = lambda *args, **kwargs: None
+    orig_signal = signal.signal
+    def mock_signal(signalnum, handler):
+        valid_signals = {
+            signal.SIGINT, signal.SIGILL, signal.SIGFPE, signal.SIGSEGV,
+            signal.SIGTERM, signal.SIGBREAK, signal.SIGABRT
+        }
+        if signalnum in valid_signals:
+            return orig_signal(signalnum, handler)
+        return None
+    signal.signal = mock_signal
+
+# Add dags folder to sys.path so that callbacks and other local imports resolve during DagBag load
+from pathlib import Path
+DAGS_DIR = str(Path(__file__).resolve().parents[2] / "dags")
+if DAGS_DIR not in sys.path:
+    sys.path.insert(0, DAGS_DIR)
 
 import pytest
 from pyspark.sql import SparkSession
 
+from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.fixture(scope="session", autouse=True)
+def init_airflow_db(tmp_path_factory) -> None:
+    """Initialize Airflow SQLite database for integration tests."""
+    airflow_home = tmp_path_factory.mktemp("airflow_home")
+    os.environ["AIRFLOW_HOME"] = str(airflow_home)
+    os.environ["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN"] = f"sqlite:///{airflow_home.as_posix()}/airflow.db"
+    
+    from airflow.utils.db import initdb
+    initdb()
 
 # Pin the Iceberg + Spark runtime coordinates that match the prod image
 # (``docker/Dockerfile.spark`` bundles the same JAR locally; CI fetches it
@@ -75,23 +119,7 @@ def spark(iceberg_warehouse: Path) -> SparkSession:
     session.stop()
 
 
-@pytest.fixture(autouse=True)
-def reset_catalog(spark: SparkSession) -> None:
-    """Drop bronze + silver namespaces between tests for isolation.
 
-    Each test gets a clean slate. Without this, table state from one test
-    leaks into the next (Iceberg's ``overwritePartitions`` + ``MERGE``
-    are intentionally stateful).
-    """
-    yield
-    for namespace in ("bronze", "silver"):
-        try:
-            spark.sql(f"DROP TABLE IF EXISTS nessie.{namespace}.breweries PURGE")
-            spark.sql(f"DROP TABLE IF EXISTS nessie.{namespace}.breweries_quarantine PURGE")
-            spark.sql(f"DROP NAMESPACE IF EXISTS nessie.{namespace}")
-        except Exception:
-            # Best-effort — quarantine table may not exist in every test
-            pass
 
 
 @pytest.fixture
