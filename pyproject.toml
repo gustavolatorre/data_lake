@@ -63,7 +63,10 @@ no_implicit_optional = true
 check_untyped_defs = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Default to unit-only discovery. Integration tests need the Iceberg
+# runtime JAR + (for DagBag) the airflow extras, so they run in their
+# own CI job that points at `tests/integration/` explicitly.
+testpaths = ["tests/unit"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
 pythonpath = ["."]

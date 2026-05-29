@@ -59,8 +59,51 @@ jobs:
       - name: Run tests with coverage
         env:
           MINIO_ROOT_USER: test-user
-          MINIO_ROOT_PASSWORD: test-password
-        run: uv run pytest --cov=src --cov-report=term-missing tests/
+          MINIO_ROOT_PASSWORD: test-password  # pragma: allowlist secret
+        run: uv run pytest --cov=src --cov-report=term-missing tests/unit/
+
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    # Heavier than the unit job: pulls in the airflow extras + lets Spark
+    # fetch the Iceberg runtime JAR through Ivy on first start.
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Create venv and install dev + airflow extras
+        run: |
+          uv venv
+          uv pip install -e ".[dev,airflow]"
+
+      - name: Cache Spark Ivy jars
+        # First Spark start downloads ``iceberg-spark-runtime-4.0_2.13`` via
+        # Ivy. Caching ``~/.ivy2`` shaves ~30s off subsequent CI runs.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.ivy2
+            ~/.cache/coursier
+          key: spark-ivy-iceberg-1.11.0-${{ runner.os }}
+
+      - name: Run integration tests
+        env:
+          # The shared settings module reads these even when integration
+          # tests don't actually talk to MinIO — keep them harmless.
+          MINIO_ROOT_USER: test-user
+          MINIO_ROOT_PASSWORD: test-password  # pragma: allowlist secret
+        run: uv run pytest -v tests/integration/
 
   dbt-validate:
     name: dbt Validate

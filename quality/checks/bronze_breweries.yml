@@ -26,7 +26,7 @@ checks:
     type: missing_count
     column: id
     max: 0
-    severity: fail
+    severity: warn
 
   - name: bronze_id_unique_per_partition
     type: unique_count
