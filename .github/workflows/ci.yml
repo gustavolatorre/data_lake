@@ -60,10 +60,7 @@ jobs:
         env:
           MINIO_ROOT_USER: test-user
           MINIO_ROOT_PASSWORD: test-password  # pragma: allowlist secret
-        # ``tests/`` here means ``testpaths`` from pyproject.toml — i.e.
-        # ``tests/unit`` only. Integration suite runs in its own job below
-        # because it needs the Iceberg JAR + airflow extras.
-        run: uv run pytest --cov=src --cov-report=term-missing tests/
+        run: uv run pytest --cov=src --cov-report=term-missing tests/unit/
 
   integration:
     name: Integration
