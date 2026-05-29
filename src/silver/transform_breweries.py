@@ -3,6 +3,10 @@
 Reads from the Bronze Iceberg table, applies native Spark transformations,
 and performs an atomic MERGE into the Silver Iceberg table with Soft Delete
 logic to handle deletions at the source.
+
+Records that fail the row-level quality rules (currently: NULL ``id``) are
+diverted to ``nessie.silver.breweries_quarantine`` instead of aborting the
+whole run. The MERGE then proceeds on the cleaned subset only.
 """
 
 import logging
@@ -12,7 +16,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-from src.utils.data_quality import check_null_counts, log_quality_summary
+from src.utils.data_quality import log_quality_summary
 from src.utils.spark_session import create_spark_session
 
 logger = logging.getLogger(__name__)
@@ -22,6 +26,10 @@ logger = logging.getLogger(__name__)
 # instability dropping pagination mid-run) silently soft-deleting half the
 # Silver table via WHEN NOT MATCHED BY SOURCE.
 MAX_SOURCE_SHRINK_RATIO = 0.20  # 20% drop = abort
+
+# Reason codes written into nessie.silver.breweries_quarantine.quarantine_reason.
+# Keep these stable — downstream alerting / dashboards filter on them.
+REASON_NULL_ID = "NULL_ID"
 
 
 class SourceShrinkError(RuntimeError):
@@ -66,32 +74,121 @@ def _run_transform(spark: SparkSession, execution_date: str) -> None:
         critical_columns=["id", "name", "brewery_type", "city", "state", "country"],
     )
 
-    # 2. Apply transformations using native Spark functions (No UDFs!)
-    transformed_df = _apply_native_transformations(source_df)
+    # 2. Split off rows that would fail the MERGE primary key (NULL id) into
+    #    the quarantine sink. This used to be a hard abort via
+    #    check_null_counts(fail_on_nulls=True); diverting instead keeps the
+    #    rest of the day's data flowing while preserving the bad rows for
+    #    investigation.
+    bad_df = source_df.filter(F.col("id").isNull())
+    good_df = source_df.filter(F.col("id").isNotNull())
+
+    bad_count = bad_df.count()
+    if bad_count > 0:
+        logger.warning("Quarantining %d row(s) with NULL id", bad_count)
+        _quarantine_invalid_records(spark, bad_df, REASON_NULL_ID, execution_date)
+    else:
+        logger.info("No NULL-id rows to quarantine for %s", execution_date)
+
+    if good_df.isEmpty():
+        logger.warning("All rows for %s were quarantined; nothing to MERGE", execution_date)
+        return
+
+    # 3. Apply transformations on the clean subset only (No UDFs!)
+    transformed_df = _apply_native_transformations(good_df)
 
     # Cache the transformed DF before the chain of count-driven steps below
-    # (check_null_counts, log_quality_summary, shrink guard, MERGE source view).
+    # (log_quality_summary, shrink guard, MERGE source view).
     # Without this each step re-runs the full Bronze read + transformations.
     transformed_df.cache()
     try:
-        # Ensure id was never nullified by transformations before writing to Silver
-        check_null_counts(transformed_df, ["id"], fail_on_nulls=True)
         log_quality_summary(
             transformed_df,
             "silver",
             critical_columns=["id", "name", "brewery_type", "city", "state", "country"],
         )
 
-        # 3. Guard rail — protect against partial fetch silently soft-deleting rows
+        # 4. Guard rail — protect against partial fetch silently soft-deleting rows
         _assert_source_not_shrinking(spark, transformed_df)
 
-        # 4. Create a temporary view for the MERGE operation
+        # 5. Create a temporary view for the MERGE operation
         transformed_df.createOrReplaceTempView("v_transformed_breweries")
 
-        # 5. Perform Atomic MERGE into Silver
+        # 6. Perform Atomic MERGE into Silver
         _execute_merge(spark)
     finally:
         transformed_df.unpersist()
+
+
+def _quarantine_invalid_records(
+    spark: SparkSession,
+    bad_df: DataFrame,
+    reason: str,
+    execution_date: str,
+) -> None:
+    """Append rows that failed Silver quality rules to the quarantine table.
+
+    The quarantine table is append-only and partitioned by ``quarantine_date``,
+    so a re-run of the same ``execution_date`` reinserts the same rows
+    (idempotency caller's responsibility — clearing the partition before re-run
+    if needed). This is intentional: we'd rather see duplicate quarantine rows
+    than drop incident evidence silently.
+
+    Args:
+        spark: Active SparkSession.
+        bad_df: DataFrame containing the rows to quarantine. Expected schema is
+            the Bronze schema (id, name, brewery_type, city, state, country,
+            ingestion_date, ingested_at).
+        reason: Stable string code (e.g. ``REASON_NULL_ID``). Goes into the
+            ``quarantine_reason`` column for downstream filtering.
+        execution_date: Date the upstream ingest ran for. Stored on every
+            quarantined row.
+    """
+    enriched = (
+        bad_df.select(
+            "id",
+            "name",
+            "brewery_type",
+            "address_1",
+            "city",
+            "state",
+            "country",
+            "ingestion_date",
+            "ingested_at",
+        )
+        .withColumn("quarantine_reason", F.lit(reason))
+        .withColumn("quarantined_at", F.current_timestamp())
+        .withColumn("quarantine_date", F.lit(execution_date))
+    )
+
+    table_name = "nessie.silver.breweries_quarantine"
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.silver")
+
+    if not spark.catalog.tableExists(table_name):
+        logger.info("Creating quarantine table %s for the first time", table_name)
+        spark.sql(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id STRING,
+                name STRING,
+                brewery_type STRING,
+                address_1 STRING,
+                city STRING,
+                state STRING,
+                country STRING,
+                ingestion_date STRING,
+                ingested_at TIMESTAMP,
+                quarantine_reason STRING,
+                quarantined_at TIMESTAMP,
+                quarantine_date STRING
+            )
+            USING iceberg
+            PARTITIONED BY (quarantine_date)
+            TBLPROPERTIES ('format-version'='2')
+        """)
+
+    # Append-only; we want history. Idempotency is via re-running on a fresh
+    # partition only (clear the partition before re-run if needed).
+    enriched.writeTo(table_name).append()
+    logger.info("Appended %d row(s) to %s (reason=%s)", enriched.count(), table_name, reason)
 
 
 def _assert_source_not_shrinking(spark: SparkSession, source_df: DataFrame) -> None:

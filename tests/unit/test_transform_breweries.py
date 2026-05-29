@@ -6,10 +6,12 @@ import pytest
 
 from src.silver.transform_breweries import (
     MAX_SOURCE_SHRINK_RATIO,
+    REASON_NULL_ID,
     SourceShrinkError,
     _apply_native_transformations,
     _assert_source_not_shrinking,
     _execute_merge,
+    _quarantine_invalid_records,
     _run_transform,
     transform,
 )
@@ -305,6 +307,150 @@ class TestRunTransformEmptySource:
 
         _run_transform(spark, "2026-04-29")
 
+        # No MERGE was issued
+        merge_calls = [args[0] for args, _ in spark.sql.call_args_list if "MERGE" in str(args[0])]
+        assert merge_calls == []
+
+
+class TestQuarantine:
+    """The quarantine sink for rows that would fail Silver quality rules."""
+
+    @staticmethod
+    def _make_chained_df():
+        """Return a MagicMock whose every chained method returns itself.
+
+        This stand-in is good enough for the `select(...).withColumn(...)`
+        chain in `_quarantine_invalid_records`, because the call shape is
+        all we assert.
+        """
+        df = MagicMock(name="DataFrame")
+        df.select.return_value = df
+        df.withColumn.return_value = df
+        df.count.return_value = 3
+        return df
+
+    @patch("src.silver.transform_breweries.F")
+    def test_creates_table_on_first_run(self, _mock_f):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = False
+        bad_df = self._make_chained_df()
+
+        _quarantine_invalid_records(spark, bad_df, REASON_NULL_ID, "2026-04-29")
+
+        ddl_calls = [args[0] for args, _ in spark.sql.call_args_list]
+        assert any("CREATE NAMESPACE IF NOT EXISTS nessie.silver" in c for c in ddl_calls)
+        create_table = next((c for c in ddl_calls if "CREATE TABLE" in c), None)
+        assert create_table is not None
+        assert "breweries_quarantine" in create_table
+        assert "PARTITIONED BY (quarantine_date)" in create_table
+        assert "format-version" in create_table
+
+    @patch("src.silver.transform_breweries.F")
+    def test_skips_create_when_table_exists(self, _mock_f):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+        bad_df = self._make_chained_df()
+
+        _quarantine_invalid_records(spark, bad_df, REASON_NULL_ID, "2026-04-29")
+
+        ddl_calls = [args[0] for args, _ in spark.sql.call_args_list]
+        assert not any("CREATE TABLE" in c for c in ddl_calls)
+
+    @patch("src.silver.transform_breweries.F")
+    def test_appends_with_writeto(self, _mock_f):
+        """Quarantine is append-only — we keep history, never overwrite."""
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+        bad_df = self._make_chained_df()
+
+        _quarantine_invalid_records(spark, bad_df, REASON_NULL_ID, "2026-04-29")
+
+        bad_df.writeTo.assert_called_with("nessie.silver.breweries_quarantine")
+        bad_df.writeTo.return_value.append.assert_called_once()
+
+    @patch("src.silver.transform_breweries.F")
+    def test_decorates_with_reason_and_quarantine_columns(self, mock_f):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+        bad_df = self._make_chained_df()
+
+        _quarantine_invalid_records(spark, bad_df, REASON_NULL_ID, "2026-04-29")
+
+        # The three .withColumn calls should add reason, quarantined_at, quarantine_date.
+        column_names = [call.args[0] for call in bad_df.withColumn.call_args_list]
+        assert column_names == ["quarantine_reason", "quarantined_at", "quarantine_date"]
+        # Reason was passed as a literal — capture by checking F.lit was called.
+        mock_f.lit.assert_any_call(REASON_NULL_ID)
+        mock_f.lit.assert_any_call("2026-04-29")
+
+    def test_reason_constant_value(self):
+        """Reason codes are part of the public contract; freeze the value."""
+        assert REASON_NULL_ID == "NULL_ID"
+
+
+class TestRunTransformQuarantineFlow:
+    """Top-level flow tests for the split that feeds the quarantine sink."""
+
+    @patch("src.silver.transform_breweries._quarantine_invalid_records")
+    @patch("src.silver.transform_breweries.F")
+    def test_quarantines_when_bad_rows_present(self, _mock_f, mock_quarantine):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+
+        bronze_df = MagicMock(name="BronzeDF")
+        bronze_df.isEmpty.return_value = False
+        bad_df = MagicMock(name="BadDF")
+        bad_df.count.return_value = 4
+        good_df = MagicMock(name="GoodDF")
+        good_df.isEmpty.return_value = True  # short-circuit MERGE for this test
+
+        bronze_df.filter.side_effect = [bad_df, good_df]
+        spark.table.return_value.filter.return_value = bronze_df
+
+        _run_transform(spark, "2026-04-29")
+
+        mock_quarantine.assert_called_once_with(spark, bad_df, REASON_NULL_ID, "2026-04-29")
+
+    @patch("src.silver.transform_breweries._quarantine_invalid_records")
+    @patch("src.silver.transform_breweries.F")
+    def test_skips_quarantine_when_no_bad_rows(self, _mock_f, mock_quarantine):
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+
+        bronze_df = MagicMock(name="BronzeDF")
+        bronze_df.isEmpty.return_value = False
+        bad_df = MagicMock(name="BadDF")
+        bad_df.count.return_value = 0
+        good_df = MagicMock(name="GoodDF")
+        good_df.isEmpty.return_value = True  # short-circuit MERGE
+
+        bronze_df.filter.side_effect = [bad_df, good_df]
+        spark.table.return_value.filter.return_value = bronze_df
+
+        _run_transform(spark, "2026-04-29")
+
+        mock_quarantine.assert_not_called()
+
+    @patch("src.silver.transform_breweries._quarantine_invalid_records")
+    @patch("src.silver.transform_breweries.F")
+    def test_short_circuits_merge_when_only_bad_rows(self, _mock_f, mock_quarantine):
+        """If every row is bad, we quarantine them but skip MERGE entirely."""
+        spark = MagicMock()
+        spark.catalog.tableExists.return_value = True
+
+        bronze_df = MagicMock(name="BronzeDF")
+        bronze_df.isEmpty.return_value = False
+        bad_df = MagicMock(name="BadDF")
+        bad_df.count.return_value = 5
+        good_df = MagicMock(name="GoodDF")
+        good_df.isEmpty.return_value = True
+
+        bronze_df.filter.side_effect = [bad_df, good_df]
+        spark.table.return_value.filter.return_value = bronze_df
+
+        _run_transform(spark, "2026-04-29")
+
+        mock_quarantine.assert_called_once()
         # No MERGE was issued
         merge_calls = [args[0] for args, _ in spark.sql.call_args_list if "MERGE" in str(args[0])]
         assert merge_calls == []
