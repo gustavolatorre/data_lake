@@ -32,6 +32,14 @@ EXPECTED_DAGS = {
         "pipeline_func": "gold_dbt_pipeline",
         "asset_uri": "iceberg://nessie/gold/breweries",
     },
+    "iceberg_maintenance.py": {
+        "dag_id": "iceberg_maintenance",
+        "pipeline_func": "iceberg_maintenance_pipeline",
+        # Non-asset DAG: maintenance runs on a @weekly cron, does not consume
+        # or emit data assets. asset_uri is intentionally None so the parametrized
+        # asset test below skips it.
+        "asset_uri": None,
+    },
 }
 
 
@@ -103,6 +111,8 @@ class TestDagStructure:
         [(f, s) for f, s in EXPECTED_DAGS.items()],
     )
     def test_asset_uri_declared(self, filename, spec):
+        if spec["asset_uri"] is None:
+            pytest.skip(f"{filename} is a non-asset DAG (cron-scheduled)")
         tree = _parse(filename)
         strings = _collect_string_constants(tree)
         assert spec["asset_uri"] in strings, f"{filename} does not reference its expected asset URI {spec['asset_uri']}"
@@ -147,3 +157,44 @@ class TestFailureCallbacks:
                     if isinstance(target, ast.Name):
                         assigned_names.add(target.id)
         assert "on_failure_callback" in (func_names | assigned_names), f"{filename} does not bind on_failure_callback"
+
+
+class TestMaintenancePoolIsolation:
+    """iceberg_maintenance must run in its own pool so it cannot starve the daily ETL."""
+
+    def test_pool_name_constant_declared(self):
+        """The DAG must declare a top-level ``MAINTENANCE_POOL`` string constant.
+
+        Frozen as a contract: the docker-compose scheduler bootstraps a pool
+        with the same name, so renaming the Python constant without updating
+        the compose command would silently leave the task in waiting state.
+        """
+        tree = _parse("iceberg_maintenance.py")
+        strings = _collect_string_constants(tree)
+        assert "maintenance_pool" in strings, (
+            "iceberg_maintenance.py must reference the literal 'maintenance_pool' — "
+            "the docker-compose scheduler creates a pool with this exact name."
+        )
+
+    def test_spark_submit_uses_pool_kwarg(self):
+        """The SparkSubmitOperator instantiation must pass pool=MAINTENANCE_POOL.
+
+        Without it, the operator falls back to default_pool and would compete
+        directly with bronze_silver_processing on the single 2g Spark worker
+        whenever the @weekly schedule lands on the same day as the daily ETL.
+        """
+        tree = _parse("iceberg_maintenance.py")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SparkSubmitOperator":
+                kwargs = {kw.arg: kw.value for kw in node.keywords}
+                assert "pool" in kwargs, "SparkSubmitOperator in iceberg_maintenance must set pool=..."
+                pool_arg = kwargs["pool"]
+                # Accept either a literal "maintenance_pool" or the constant Name.
+                if isinstance(pool_arg, ast.Constant):
+                    assert pool_arg.value == "maintenance_pool"
+                elif isinstance(pool_arg, ast.Name):
+                    assert pool_arg.id == "MAINTENANCE_POOL"
+                else:
+                    pytest.fail(f"unexpected AST node for pool kwarg: {ast.dump(pool_arg)}")
+                return
+        pytest.fail("iceberg_maintenance.py does not instantiate SparkSubmitOperator")

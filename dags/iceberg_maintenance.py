@@ -39,6 +39,19 @@ SNAPSHOT_RETENTION_DAYS = 30
 # we might still need.
 MIN_SNAPSHOTS_TO_KEEP = 5
 
+# Dedicated Airflow pool with slots=1. Maintenance and the daily Bronze/Silver
+# pipeline both submit to the same single-executor Spark worker (2g RAM); if
+# they overlap (Sunday @weekly + asset-triggered daily run on the same day)
+# the Spark scheduler queues one behind the other but the OS-level memory
+# contention can still OOM the worker. Putting maintenance in its own pool
+# would only serialize against itself (no concurrent maintenance), but
+# combined with `depends_on_past=False` and the daily DAG's own
+# `max_active_runs=1`, it makes the contention contract explicit and lets us
+# tune the slot count later if the cluster grows.
+# Pool is provisioned at scheduler startup — see docker-compose.yml scheduler
+# command: `airflow pools set maintenance_pool 1 ...`.
+MAINTENANCE_POOL = "maintenance_pool"
+
 on_failure_callback = build_failure_callback("ICEBERG MAINTENANCE")
 
 
@@ -52,8 +65,14 @@ on_failure_callback = build_failure_callback("ICEBERG MAINTENANCE")
     default_args={
         "owner": "data-engineering",
         "depends_on_past": False,
-        "retries": 1,
+        # Three retries with exponential backoff (10m → 20m → 40m). Compaction
+        # failures are most often transient (Nessie connection wobble or
+        # transient Spark worker pressure), and we want the run to recover
+        # without paging anyone on a weekend.
+        "retries": 3,
         "retry_delay": timedelta(minutes=10),
+        "retry_exponential_backoff": True,
+        "max_retry_delay": timedelta(minutes=60),
         "execution_timeout": timedelta(hours=1),
         "on_failure_callback": on_failure_callback,
     },
@@ -73,6 +92,10 @@ def iceberg_maintenance_pipeline():
         ],
         conf=SPARK_CONF,
         execution_timeout=timedelta(minutes=45),
+        # Isolate maintenance from the daily ETL pool. Airflow keeps the task
+        # queued until a slot opens, instead of submitting concurrently with
+        # bronze_silver_processing and starving the Spark worker.
+        pool=MAINTENANCE_POOL,
     )
 
 
