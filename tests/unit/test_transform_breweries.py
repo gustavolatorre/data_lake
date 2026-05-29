@@ -303,7 +303,9 @@ class TestRunTransformEmptySource:
         spark = MagicMock()
         bronze_df = MagicMock()
         bronze_df.isEmpty.return_value = True
-        spark.table.return_value.filter.return_value = bronze_df
+        # P2.3 added dual-filter on (ingestion_date, ingestion_ts) before
+        # the bad/good split; the source_df is the result of two filters.
+        spark.table.return_value.filter.return_value.filter.return_value = bronze_df
 
         _run_transform(spark, "2026-04-29")
 
@@ -405,7 +407,10 @@ class TestRunTransformQuarantineFlow:
         good_df.isEmpty.return_value = True  # short-circuit MERGE for this test
 
         bronze_df.filter.side_effect = [bad_df, good_df]
-        spark.table.return_value.filter.return_value = bronze_df
+        # P2.3 added a dual-filter on (ingestion_date, ingestion_ts) before
+        # the bad/good split, so the chain is now:
+        #   spark.table().filter(date).filter(ts)  -> bronze_df
+        spark.table.return_value.filter.return_value.filter.return_value = bronze_df
 
         _run_transform(spark, "2026-04-29")
 
@@ -425,7 +430,10 @@ class TestRunTransformQuarantineFlow:
         good_df.isEmpty.return_value = True  # short-circuit MERGE
 
         bronze_df.filter.side_effect = [bad_df, good_df]
-        spark.table.return_value.filter.return_value = bronze_df
+        # P2.3 added a dual-filter on (ingestion_date, ingestion_ts) before
+        # the bad/good split, so the chain is now:
+        #   spark.table().filter(date).filter(ts)  -> bronze_df
+        spark.table.return_value.filter.return_value.filter.return_value = bronze_df
 
         _run_transform(spark, "2026-04-29")
 
@@ -446,7 +454,10 @@ class TestRunTransformQuarantineFlow:
         good_df.isEmpty.return_value = True
 
         bronze_df.filter.side_effect = [bad_df, good_df]
-        spark.table.return_value.filter.return_value = bronze_df
+        # P2.3 added a dual-filter on (ingestion_date, ingestion_ts) before
+        # the bad/good split, so the chain is now:
+        #   spark.table().filter(date).filter(ts)  -> bronze_df
+        spark.table.return_value.filter.return_value.filter.return_value = bronze_df
 
         _run_transform(spark, "2026-04-29")
 
