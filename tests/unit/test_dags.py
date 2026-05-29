@@ -22,6 +22,11 @@ EXPECTED_DAGS = {
         "pipeline_func": "staging_ingestion_pipeline",
         "asset_uri": "s3://staging/breweries",
     },
+    "staging_brasileirao_ingestion.py": {
+        "dag_id": "staging_brasileirao_ingestion",
+        "pipeline_func": "staging_brasileirao_pipeline",
+        "asset_uri": "s3://staging/brasileirao",
+    },
     "bronze_silver_processing.py": {
         "dag_id": "bronze_silver_processing",
         "pipeline_func": "bronze_silver_pipeline",
