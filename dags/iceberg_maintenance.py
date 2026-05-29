@@ -91,7 +91,7 @@ def iceberg_maintenance_pipeline():
         execution_timeout=timedelta(minutes=45),
         # Isolate maintenance from the daily ETL pool. Airflow keeps the task
         # queued until a slot opens, instead of submitting concurrently with
-        # bronze_silver_processing and starving the Spark worker.
+        # bronze_silver_breweries_processing and starving the Spark worker.
         pool=MAINTENANCE_POOL,
     )
 

@@ -17,9 +17,9 @@ import pytest
 DAGS_DIR = Path(__file__).resolve().parents[2] / "dags"
 
 EXPECTED_DAGS = {
-    "staging_ingestion.py": {
-        "dag_id": "staging_ingestion",
-        "pipeline_func": "staging_ingestion_pipeline",
+    "staging_breweries_ingestion.py": {
+        "dag_id": "staging_breweries_ingestion",
+        "pipeline_func": "staging_breweries_pipeline",
         "asset_uri": "s3://staging/breweries",
     },
     "staging_brasileirao_ingestion.py": {
@@ -27,14 +27,14 @@ EXPECTED_DAGS = {
         "pipeline_func": "staging_brasileirao_pipeline",
         "asset_uri": "s3://staging/brasileirao",
     },
-    "bronze_silver_processing.py": {
-        "dag_id": "bronze_silver_processing",
-        "pipeline_func": "bronze_silver_pipeline",
+    "bronze_silver_breweries_processing.py": {
+        "dag_id": "bronze_silver_breweries_processing",
+        "pipeline_func": "bronze_silver_breweries_pipeline",
         "asset_uri": "iceberg://nessie/silver/breweries",
     },
-    "gold_dbt_processing.py": {
-        "dag_id": "gold_dbt_processing",
-        "pipeline_func": "gold_dbt_pipeline",
+    "gold_dbt_breweries_processing.py": {
+        "dag_id": "gold_dbt_breweries_processing",
+        "pipeline_func": "gold_dbt_breweries_pipeline",
         "asset_uri": "iceberg://nessie/gold/breweries",
     },
     "iceberg_maintenance.py": {
@@ -185,7 +185,7 @@ class TestMaintenancePoolIsolation:
         """The SparkSubmitOperator instantiation must pass pool=MAINTENANCE_POOL.
 
         Without it, the operator falls back to default_pool and would compete
-        directly with bronze_silver_processing on the single 2g Spark worker
+        directly with bronze_silver_breweries_processing on the single 2g Spark worker
         whenever the @weekly schedule lands on the same day as the daily ETL.
         """
         tree = _parse("iceberg_maintenance.py")

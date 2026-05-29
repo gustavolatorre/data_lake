@@ -1,4 +1,4 @@
-"""Thin wrapper over the Nessie REST API for branch lifecycle (P3.1).
+"""Thin wrapper over the Nessie REST API for branch lifecycle.
 
 Each Bronze/Silver run creates an **isolated branch** off ``main``, writes
 to it, and merges back only after the quality gates have passed. If a step
@@ -107,7 +107,7 @@ def create_branch(name: str, *, source_ref: str = "main") -> None:
         logger.warning("Nessie branch '%s' already exists — reusing it", name)
         return
 
-    # P3.12 — make sure source_ref has at least one real commit. A freshly
+    # Make sure source_ref has at least one real commit. A freshly
     # provisioned Nessie has main at the NO_ANCESTOR sentinel hash; merging an
     # etl branch back into that state fails with REFERENCE_NOT_FOUND ("no
     # common ancestor in parents of …") because the sentinel isn't a walkable

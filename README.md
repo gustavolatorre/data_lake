@@ -347,9 +347,9 @@ make lint
 ```
 data_lake/
 ├── dags/                          # Airflow DAG definitions (3 reactive + 1 cron)
-│   ├── staging_ingestion.py       # Layer 1: API ingestion (daily schedule)
-│   ├── bronze_silver_processing.py # Layer 2: Spark Bronze + Silver, branch-isolated (asset-triggered)
-│   ├── gold_dbt_processing.py     # Layer 3: dbt Gold modeling (asset-triggered)
+│   ├── staging_breweries_ingestion.py       # Layer 1: API ingestion (daily schedule)
+│   ├── bronze_silver_breweries_processing.py # Layer 2: Spark Bronze + Silver, branch-isolated (asset-triggered)
+│   ├── gold_dbt_breweries_processing.py     # Layer 3: dbt Gold modeling (asset-triggered)
 │   ├── iceberg_maintenance.py     # Weekly: rewrite_data_files + expire_snapshots + remove_orphan_files
 │   └── callbacks.py               # Shared on_failure_callback factory
 ├── src/                           # Core Python business logic

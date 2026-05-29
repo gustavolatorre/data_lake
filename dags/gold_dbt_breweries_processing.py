@@ -24,13 +24,13 @@ local_tz = pendulum.timezone("America/Sao_Paulo")
 iceberg_silver_breweries = Asset("iceberg://nessie/silver/breweries")
 iceberg_gold_breweries = Asset("iceberg://nessie/gold/breweries")
 
-on_failure_callback = build_failure_callback("GOLD DBT PROCESSING")
+on_failure_callback = build_failure_callback("GOLD DBT BREWERIES PROCESSING")
 
 DBT_PROJECT_DIR = "/opt/airflow/dbt_project"
 
 
 @dag(
-    dag_id="gold_dbt_processing",
+    dag_id="gold_dbt_breweries_processing",
     description="Analytics layer: Iceberg Silver → dbt build (Gold) on Dremio",
     schedule=iceberg_silver_breweries,  # Agendamento reativo por Asset
     start_date=pendulum.datetime(2024, 1, 1, tz=local_tz),
@@ -46,7 +46,7 @@ DBT_PROJECT_DIR = "/opt/airflow/dbt_project"
     },
     tags=["brewery", "gold", "dbt", "dremio"],
 )
-def gold_dbt_pipeline():
+def gold_dbt_breweries_pipeline():
     """Execute a single ``dbt build`` to materialize Gold and run quality gates."""
 
     BashOperator(
@@ -68,4 +68,4 @@ def gold_dbt_pipeline():
 
 
 # Instanciar a pipeline
-gold_dbt_pipeline()
+gold_dbt_breweries_pipeline()
