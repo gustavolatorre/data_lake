@@ -57,11 +57,12 @@ The ingestion script (`src/staging/fetch_breweries.py`) executes paginated scans
 *   **Partition Mapping:** Saved under the path layout `s3://staging/breweries/{execution_date}/breweries_page_{page}.json`.
 
 ### 2. History Preservation (Bronze Layer)
-The Bronze ingestion task (`src/bronze/ingest_breweries.py`) reads the daily raw staging JSON files and appends them to a structured Apache Iceberg table:
-*   **Absolute Immutability:** The Bronze table operates strictly in **Append-Only** mode (`.append()`), functioning as our historical audit trail and immutable source of truth.
-*   **Technical Enrichment:** Rows are enriched with runtime metadata: `ingested_at` (UTC timestamp) and `ingestion_date` (logical processing partition).
-*   **Iceberg Format-Version 2:** Configured explicitly with `format-version = 2` to support row-level deletes natively for downstream operations and GDPR/auditing requirements.
-*   **Partitioning Strategy:** Partitioned logically by the `ingestion_date` column, enabling Spark to perform *partition pruning* (scanning only the new daily arrival instead of full historical scans).
+The Bronze ingestion task (`src/bronze/ingest_breweries.py`) reads the daily raw staging JSON files and writes them to a structured Apache Iceberg table:
+*   **Idempotent Overwrite (NOT plain append):** Bronze writes use `writeTo(...).overwritePartitions()` rather than `.append()`. Re-running the same `execution_date` atomically replaces only that day's partition, so retries and manual re-runs converge to the same final state — no duplicates, no manual cleanup.
+*   **Technical Enrichment:** Rows are enriched with three runtime metadata columns: `ingested_at` (wall-clock UTC, useful for forensics + within-batch dedup), `ingestion_date` (stable string `YYYY-MM-DD`, exposed as a join key), and `ingestion_ts` (logical timestamp derived from `execution_date`, drives the hidden partition spec).
+*   **Iceberg Format-Version 2 + `gc.enabled=true`:** Configured explicitly to support row-level deletes natively for downstream operations and to allow `iceberg_maintenance` to expire snapshots / remove orphan files without a defensive `ALTER TABLE`.
+*   **Hidden Partitioning by `days(ingestion_ts)`:** The partition spec uses Iceberg's `days(...)` transform on the timestamp column (P2.3), not the string `ingestion_date` directly. Why: (1) Iceberg owns the partition layout, so we can evolve to `hours(...)` or `months(...)` later without rewriting data; (2) pruning works off a real timestamp predicate, type-safe; (3) `ingestion_ts` is derived from the logical `execution_date` (not wall-clock), so two re-runs on the same logical date land on the SAME partition — that is what makes `overwritePartitions()` idempotent.
+*   **Pre-write Quality Gate (P3.7):** Before the write commits, `src/utils/quality_runner.py` evaluates `quality/checks/bronze_breweries.yml` against the in-memory DataFrame. Any `fail`-severity rule (e.g. NULL `id`, empty batch) raises `QualityCheckError` and aborts the run before any Iceberg state changes.
 
 ### 3. Cleaning, Deduplication & Atomic MERGE (Silver Layer)
 The Silver layer transformation (`src/silver/transform_breweries.py`) represents the core business logic, executing three critical operations:
@@ -123,7 +124,32 @@ The Gold analytics layer serves downstream business intelligence and reporting.
     *   **Snapshot:** `snap_breweries` — timestamp-based snapshot on Silver's `updated_at`, producing `dbt_valid_from`/`dbt_valid_to` for point-in-time queries.
 *   **Strict Quality Gates:** We enforce strict data quality validations (`not_null`, `unique`, and foreign key referential integrity) via dbt test gates. The output analytical Asset is only updated if all quality checks pass.
 
-### 5. Bronze Table Schema (Reference)
+The Bronze table is enriched with three injected metadata columns: `ingestion_date` (STRING, exposed as a join key), `ingested_at` (TIMESTAMP UTC, wall-clock from `F.current_timestamp()`), and `ingestion_ts` (TIMESTAMP, logical timestamp derived from `execution_date` — the actual partition driver via `days(ingestion_ts)`).
+
+The Silver layer is **partitioned by `state`**, which speeds up Gold queries that filter or aggregate by geography. Records that fail row-level rules (currently: NULL `id`) are not dropped — they are diverted to **`nessie.silver.breweries_quarantine`** (append-only, partitioned by `quarantine_date`, tagged with a stable `quarantine_reason` code) so downstream alerting can act on them without losing forensic evidence.
+
+### 5. Operational Layers (Maintenance, Observability, Quality Contracts)
+
+Three transversal subsystems run alongside the Bronze/Silver/Gold pipeline and deserve their own callout because they are not part of the visible data flow:
+
+#### 5a. Declarative Quality Contracts (Bronze & Silver — P3.7)
+
+Beyond dbt tests (which only cover Gold), the project ships an in-house declarative DQ runner:
+
+*   **YAML rule files** live under `quality/checks/` (one per dataset: `bronze_breweries.yml`, `silver_breweries.yml`). Stable rule names — downstream dashboards filter on them.
+*   **Runner** is `src/utils/quality_runner.py`. Four rule types supported today: `row_count`, `missing_count`, `unique_count`, `missing_percent`. Each rule has `severity: fail` (raises `QualityCheckError` and aborts the run) or `severity: warn` (logs only).
+*   **Bronze contract** runs **pre-write** in `src/bronze/ingest_breweries.py` — a bad batch never reaches Iceberg.
+*   **Silver contract** runs **post-MERGE** in `src/silver/transform_breweries.py` against the materialized Silver table — corrupted state is caught while the Nessie branch is still isolated. A `fail` raises through the SparkSubmit, the DAG fails, and `cleanup_branch` drops the branch so `main` never sees the bad state.
+
+#### 5b. Weekly Iceberg Maintenance
+
+The `iceberg_maintenance` DAG (`@weekly`) runs three Iceberg procedures against the Bronze and Silver tables: `rewrite_data_files` (compaction), `expire_snapshots` (retention: 30 days, minimum 5 kept), and `remove_orphan_files` (cleans up data files left by failed writes). It runs in its own Airflow pool (`maintenance_pool`, slots=1) — provisioned automatically by the scheduler's startup command — so it cannot starve the daily ETL on the single 2GB Spark worker. Retries are exponential (10m → 20m → 40m, capped at 60m).
+
+#### 5c. OpenLineage (Opt-in)
+
+The OpenLineage Spark listener JAR is baked into the Spark image. It is **not registered by default** — the SparkSession factory only attaches `spark.extraListeners` when `OPENLINEAGE_URL` is non-empty. Set the env var pointing at a Marquez or compatible backend to start emitting lineage events; leave it unset and the listener is a no-op (no phone-home).
+
+### 6. Bronze Table Schema (Reference)
 The Bronze table preserves every field returned by the OpenBreweryDB API plus two ingestion metadata columns:
 
 | Column | Type | Source |
@@ -140,7 +166,7 @@ The Bronze table preserves every field returned by the OpenBreweryDB API plus tw
 
 The Silver layer trims this down to the analytical subset (`id`, `name`, `brewery_type`, `address_1`, `city`, `state`, `country`, `is_active`, `updated_at`, `ingestion_date`) and is **partitioned by `state`**, which speeds up Gold queries that filter or aggregate by geography.
 
-### 6. Auto-Provisioning of Services
+### 7. Auto-Provisioning of Services
 Two pieces of plumbing make the stack work out of the box without manual UI clicks:
 
 *   **Dremio sources** (`docker/dremio/setup_sources.sh`): runs once via the `dremio-setup` container after Dremio becomes healthy. Registers the Nessie catalog and the MinIO `warehouse` bucket as Dremio sources, so dbt can immediately query `lakehouse.silver.breweries` and write into the `gold` space.
@@ -249,20 +275,21 @@ The project Makefile wraps all Docker CLI complexities. Build and launch all ser
 make up
 ```
 
-This command provisions the following **10 services** in our isolated bridge network (`lakehouse`):
+This command provisions the following **11 services** in our isolated bridge network (`lakehouse`) — nine long-running containers plus two one-shot setup containers:
 
 | Service | Description |
 | :--- | :--- |
-| **MinIO** | S3-compatible object storage with pre-configured `staging` and `warehouse` buckets |
+| **MinIO** | S3-compatible object storage |
+| **MinIO Setup** *(one-shot)* | Creates the `staging` and `warehouse` buckets, then exits |
 | **PostgreSQL** | Airflow metadata store (internal credentials, isolated from UI login) |
 | **Nessie** | Iceberg REST Catalog Server with Git-like versioning semantics |
 | **Spark Master** | Distributed processing coordinator |
 | **Spark Worker** | Execution node connected to Spark Master (2 cores, 2GB RAM) |
-| **Airflow Scheduler** | Task scheduling engine (decoupled from DAG parsing in Airflow 3.x) |
+| **Airflow Scheduler** | Task scheduling engine (decoupled from DAG parsing in Airflow 3.x); also provisions the `maintenance_pool` slot on startup |
 | **Airflow DAG Processor** | Standalone DAG file parser and serializer (new in Airflow 3.x) |
 | **Airflow API Server** | Web UI and REST API (replaces legacy `webserver` command) |
 | **Dremio** | SQL query virtualization engine, pre-wired to Nessie and MinIO |
-| **Dremio Provisioner** | One-shot setup container that registers Nessie/MinIO sources in Dremio |
+| **Dremio Setup** *(one-shot)* | Registers Nessie + MinIO as Dremio sources, then exits |
 
 ### 4. Port Mapping & Monitoring UIs
 
@@ -287,11 +314,15 @@ You can access and monitor the active nodes and service consoles using the follo
 | `make logs-airflow` | Tail Airflow scheduler logs |
 | `make logs-spark` | Tail Spark master logs |
 | `make test` | Run unit tests with coverage report |
-| `make lint` | Run Ruff linter on all Python code |
+| `make lint` | Run Ruff linter + mypy on all Python code (matches the CI `Lint` job for **`ruff check` + `mypy`** only — the CI also runs `ruff format --check`; run `uv run ruff format --check src/ tests/ dags/` locally before pushing to avoid a CI failure on formatting) |
 | `make fmt` | Auto-format all Python code with Ruff |
 | `make clean` | Remove `__pycache__`, `.pytest_cache`, and coverage artifacts |
 | `make fernet-key` | Generate a new Fernet encryption key for Airflow |
-| `make webserver-key` | Generate a new secret key for the Airflow API server |
+| `make webserver-key` | Generate a new Webserver Secret Key for Airflow |
+| `make jwt-secret-key` | Generate a new JWT Secret Key for the Airflow Execution API |
+| `make init-secrets` | Bootstrap a fresh `airflow.env` from the example, auto-filling Fernet + Webserver + JWT keys (idempotent: refuses to overwrite an existing file) |
+| `make init-precommit` | Install `pre-commit` + `detect-secrets` and register the Git hooks |
+| `make security-scan` | Run `pip-audit --strict` against installed deps (mirrors the CI Security job) |
 | `make help` | List all available commands |
 
 ---
@@ -315,26 +346,39 @@ make lint
 
 ```
 data_lake/
-├── dags/                          # Airflow DAG definitions (3 reactive DAGs)
+├── dags/                          # Airflow DAG definitions (3 reactive + 1 cron)
 │   ├── staging_ingestion.py       # Layer 1: API ingestion (daily schedule)
-│   ├── bronze_silver_processing.py # Layer 2: Spark Bronze + Silver (asset-triggered)
-│   └── gold_dbt_processing.py     # Layer 3: dbt Gold modeling (asset-triggered)
+│   ├── bronze_silver_processing.py # Layer 2: Spark Bronze + Silver, branch-isolated (asset-triggered)
+│   ├── gold_dbt_processing.py     # Layer 3: dbt Gold modeling (asset-triggered)
+│   ├── iceberg_maintenance.py     # Weekly: rewrite_data_files + expire_snapshots + remove_orphan_files
+│   └── callbacks.py               # Shared on_failure_callback factory
 ├── src/                           # Core Python business logic
 │   ├── staging/                   # API fetch & S3 streaming
-│   ├── bronze/                    # Iceberg append-only ingestion
-│   ├── silver/                    # MERGE INTO + soft delete transforms
-│   └── utils/                     # Shared Spark session factory & configs
+│   ├── bronze/                    # Iceberg ingestion (overwritePartitions for idempotency)
+│   ├── silver/                    # MERGE INTO + soft delete transforms + quarantine sink
+│   ├── maintenance/               # Iceberg compaction / snapshot expiration entrypoint
+│   ├── config/                    # Pydantic-settings application config
+│   └── utils/                     # SparkSession factory, MinIO client, logging,
+│                                  #   Nessie branch helper, declarative quality runner
+├── quality/
+│   └── checks/                    # YAML quality contracts (bronze_breweries.yml,
+│                                  #   silver_breweries.yml) — loaded by quality_runner
 ├── dbt_project/                   # dbt Core project (Gold layer on Dremio)
 ├── docker/                        # Dockerfiles & provisioning scripts
-│   ├── Dockerfile.spark           # Spark 4.0.0 + Iceberg + AWS SDK v2
-│   ├── Dockerfile.airflow         # Airflow 3.2.1 + PySpark + dbt
-│   └── dremio/                    # Dremio source setup scripts
-├── tests/                         # Unit tests (pytest + mocks)
-├── docker-compose.yml             # 10-service orchestration topology
+│   ├── Dockerfile.spark           # Spark 4.0.0 + Iceberg + AWS SDK v2 + OpenLineage listener (JARs SHA-512 verified)
+│   ├── Dockerfile.airflow         # Airflow 3.2.1 + PySpark + dbt-dremio (JARs SHA-512 verified)
+│   ├── airflow/                   # generate_auth_file.py — SimpleAuthManager bootstrap
+│   └── dremio/                    # setup_sources.sh — registers Nessie + MinIO in Dremio
+├── tests/                         # Unit tests (pytest + chispa + AST-based DAG validation)
+├── .github/
+│   ├── workflows/ci.yml           # CI: Lint (ruff + mypy + ruff format --check), Test, dbt Validate, Security
+│   └── dependabot.yml             # pip, docker, github-actions ecosystems
+├── docker-compose.yml             # 11-service orchestration topology
 ├── Makefile                       # Developer CLI shortcuts
 ├── pyproject.toml                 # Python dependencies (uv/pip compatible)
 ├── .env.example                   # Environment variable template
 ├── airflow.env.example            # Airflow-specific configuration template
+├── .pre-commit-config.yaml        # detect-secrets + ruff + standard hooks
 └── .gitignore                     # Git exclusions (env files, venvs, dbt artifacts)
 ```
 
