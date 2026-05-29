@@ -86,6 +86,34 @@ def create_spark_session(app_name: str, *, nessie_ref: str = "main") -> SparkSes
             "spark.hadoop.fs.s3a.impl",
             "org.apache.hadoop.fs.s3a.S3AFileSystem",
         )
+        # Force SimpleAWSCredentialsProvider so the AWS SDK v2 driver does not
+        # walk the DefaultCredentialsProviderChain (IMDS lookups against MinIO
+        # add seconds of latency on every read).
+        .config(
+            "spark.hadoop.fs.s3a.aws.credentials.provider",
+            "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+        )
+        # MinIO endpoint is plain HTTP in this stack — be explicit so Hadoop
+        # 3.4 does not try to negotiate TLS and fail with a handshake error.
+        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+        # Kryo serializer — what the docstring above promises. Required for
+        # Iceberg's internal shuffle of complex types to stay efficient.
+        .config(
+            "spark.serializer",
+            "org.apache.spark.serializer.KryoSerializer",
+        )
+        # Adaptive Query Execution: lets the optimizer coalesce empty
+        # shuffle partitions and re-balance skewed joins at runtime. AQE is
+        # default-on in Spark 4.0, but we pin it explicitly so future
+        # downgrades or config drift do not silently disable it.
+        .config("spark.sql.adaptive.enabled", "true")
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+        .config("spark.sql.adaptive.skewJoin.enabled", "true")
+        # Shuffle partitions: the default of 200 creates 200 tiny tasks for
+        # the brewery dataset (<50k rows) on a 2-core worker, dominating
+        # scheduling overhead. AQE coalesces partitions but having a sane
+        # starting point keeps the first stage cheap.
+        .config("spark.sql.shuffle.partitions", "8")
     )
     builder = _apply_openlineage_config(builder, settings, app_name)
     session: SparkSession = builder.getOrCreate()
