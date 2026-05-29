@@ -44,6 +44,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _enable_gc(spark: SparkSession, table: str) -> None:
+    """Allow ``expire_snapshots`` + ``remove_orphan_files`` to delete files.
+
+    Iceberg defaults ``gc.enabled`` to ``false`` as a safety guard against
+    shared/external metadata (e.g. another engine pointing at the same
+    files). We own these tables exclusively, so we flip the switch
+    idempotently before any GC procedure runs.
+    """
+    logger.info("Enabling GC on %s (gc.enabled=true)", table)
+    spark.sql(f"ALTER TABLE {table} SET TBLPROPERTIES ('gc.enabled'='true')")
+
+
 def _rewrite_data_files(spark: SparkSession, table: str) -> None:
     """Run Iceberg's bin-pack compaction on ``table``."""
     logger.info("Rewriting data files: %s", table)
@@ -87,15 +99,18 @@ def run_maintenance(retention_days: int, min_snapshots: int) -> None:
 
     try:
         for table in MAINTAINED_TABLES:
-            try:
-                _rewrite_data_files(spark, table)
-                _expire_snapshots(spark, table, retention_days, min_snapshots)
-                _remove_orphan_files(spark, table)
-                logger.info("Maintenance complete for %s", table)
-            except Exception:
-                # Log and continue: one failing table should not block the others
-                logger.exception("Maintenance failed for %s", table)
-                raise
+            if not spark.catalog.tableExists(table):
+                # Quarantine + snapshot tables are only created on demand
+                # (when an invalid row is rejected, when dbt runs, etc.).
+                # Skipping a missing table is preferable to making the whole
+                # weekly DAG red.
+                logger.info("Skipping %s — table does not exist yet", table)
+                continue
+            _enable_gc(spark, table)
+            _rewrite_data_files(spark, table)
+            _expire_snapshots(spark, table, retention_days, min_snapshots)
+            _remove_orphan_files(spark, table)
+            logger.info("Maintenance complete for %s", table)
     finally:
         spark.stop()
         logger.info("SparkSession stopped")

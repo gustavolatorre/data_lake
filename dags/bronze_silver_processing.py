@@ -25,7 +25,7 @@ from datetime import timedelta
 import pendulum
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.sdk import Asset, dag, task
-from airflow.utils.trigger_rule import TriggerRule
+from airflow.task.trigger_rule import TriggerRule
 from callbacks import build_failure_callback
 
 logger = logging.getLogger("airflow.task")

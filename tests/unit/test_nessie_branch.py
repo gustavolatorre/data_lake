@@ -212,7 +212,7 @@ class TestMergeBranch:
         )
         responses.add(
             responses.POST,
-            "http://nessie:19120/api/v2/trees/main@tgt/merge",
+            "http://nessie:19120/api/v2/trees/main@tgt/history/merge",
             json={"merged": True},
             status=200,
         )
@@ -220,7 +220,7 @@ class TestMergeBranch:
         merge_branch("etl_x", target="main")
 
         post = next(c for c in responses.calls if c.request.method == "POST")
-        assert "main@tgt/merge" in post.request.url
+        assert "main@tgt/history/merge" in post.request.url
         assert "fromRefName" in post.request.body.decode()
         assert "etl_x" in post.request.body.decode()
         assert "src" in post.request.body.decode()  # fromHash
@@ -241,7 +241,7 @@ class TestMergeBranch:
         )
         responses.add(
             responses.POST,
-            "http://nessie:19120/api/v2/trees/main@tgt/merge",
+            "http://nessie:19120/api/v2/trees/main@tgt/history/merge",
             json={"reason": "conflict"},
             status=409,
         )

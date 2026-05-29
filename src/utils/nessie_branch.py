@@ -152,8 +152,12 @@ def merge_branch(source: str, *, target: str = "main") -> None:
     src_hash = _ref_hash(source)
     target_hash = _ref_hash(target)
 
-    # v2 spec: POST /trees/{target}/merge
-    url = f"{_base_url()}/trees/{target}@{target_hash}/merge"
+    # v2 spec: POST /trees/{target}@{expected-hash}/history/merge
+    # The `/history/` segment is mandatory in v2 — without it the server
+    # returns 404 with an empty body. (v1 used a flat `/merge` path; the
+    # first cut at this used that URL and we hit "No URL specified" 404s
+    # every run until we corrected it.)
+    url = f"{_base_url()}/trees/{target}@{target_hash}/history/merge"
     payload = {
         "fromRefName": source,
         "fromHash": src_hash,
