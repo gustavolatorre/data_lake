@@ -300,9 +300,14 @@ class TestMergeBranch:
 
         post = next(c for c in responses.calls if c.request.method == "POST")
         assert "main@tgt/history/merge" in post.request.url
-        assert "fromRefName" in post.request.body.decode()
-        assert "etl_x" in post.request.body.decode()
-        assert "src" in post.request.body.decode()  # fromHash
+        body = post.request.body.decode()
+        assert "fromRefName" in body
+        assert "etl_x" in body
+        assert "src" in body  # fromHash
+        # P3.14: FORCE mode lets the ETL pattern (isolated branch is source-of-
+        # truth) keep working across consecutive runs. NORMAL bails on
+        # historical key overlap even when target hasn't moved since last merge.
+        assert "FORCE" in body
 
     @responses.activate
     def test_raises_on_conflict(self, fake_settings):
