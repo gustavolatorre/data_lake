@@ -1,10 +1,7 @@
 """Unit tests for Brasileirão Staging layer — API fetch and MinIO upload."""
 
-import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-import requests
 import responses
 from minio.error import S3Error
 
@@ -27,17 +24,17 @@ class TestNormalizeMatch:
             "hora_realizacao": "19:00",
             "equipes": {
                 "mandante": {"nome_popular": "Vasco", "sigla": "VAS"},
-                "visitante": {"nome_popular": "Palmeiras", "sigla": "PAL"}
+                "visitante": {"nome_popular": "Palmeiras", "sigla": "PAL"},
             },
             "placar_oficial_mandante": 1,
             "placar_oficial_visitante": 0,
             "sede": {"nome_popular": "São Januário"},
             "jogo_ja_comecou": True,
-            "id": 12345
+            "id": 12345,
         }
-        
+
         result = _normalize_match(mock_ge_json, rodada=10)
-        
+
         assert result is not None
         assert result["matchweek"] == 10
         assert result["home_team"] == "Vasco"
@@ -65,15 +62,15 @@ class TestNormalizeMatch:
             "hora_realizacao": "16:00",
             "equipes": {
                 "mandante": {"nome_popular": "Galo", "sigla": "CAM"},
-                "visitante": {"nome_popular": "Bahia", "sigla": "BAH"}
+                "visitante": {"nome_popular": "Bahia", "sigla": "BAH"},
             },
             "placar_oficial_mandante": None,
             "placar_oficial_visitante": None,
             "sede": {"nome_popular": "Arena MRV"},
             "jogo_ja_comecou": False,
-            "id": 999
+            "id": 999,
         }
-        
+
         result = _normalize_match(mock_ge_json, rodada=12)
         assert result is not None
         assert result["score_home"] is None
@@ -91,21 +88,25 @@ class TestFetchAllMatches:
         responses.add(
             responses.GET,
             GE_API_BASE.format(rodada=1),
-            json=[{
-                "data_realizacao": "2026-04-10T16:00",
-                "equipes": {"mandante": {"nome_popular": "A"}, "visitante": {"nome_popular": "B"}}
-            }],
-            status=200
+            json=[
+                {
+                    "data_realizacao": "2026-04-10T16:00",
+                    "equipes": {"mandante": {"nome_popular": "A"}, "visitante": {"nome_popular": "B"}},
+                }
+            ],
+            status=200,
         )
         # Round 2 data
         responses.add(
             responses.GET,
             GE_API_BASE.format(rodada=2),
-            json=[{
-                "data_realizacao": "2026-04-17T16:00",
-                "equipes": {"mandante": {"nome_popular": "C"}, "visitante": {"nome_popular": "D"}}
-            }],
-            status=200
+            json=[
+                {
+                    "data_realizacao": "2026-04-17T16:00",
+                    "equipes": {"mandante": {"nome_popular": "C"}, "visitante": {"nome_popular": "D"}},
+                }
+            ],
+            status=200,
         )
 
         matches = _fetch_all_matches()
@@ -117,13 +118,8 @@ class TestFetchAllMatches:
     @patch("src.staging.fetch_brasileirao.TOTAL_ROUNDS", 1)
     def test_http_error_handling(self):
         """Should gracefully ignore a round if the HTTP request fails."""
-        responses.add(
-            responses.GET,
-            GE_API_BASE.format(rodada=1),
-            json={"error": "Not found"},
-            status=404
-        )
-        
+        responses.add(responses.GET, GE_API_BASE.format(rodada=1), json={"error": "Not found"}, status=404)
+
         matches = _fetch_all_matches()
         assert len(matches) == 0
 
@@ -162,19 +158,19 @@ class TestFetchAndUpload:
         mock_first_run.return_value = True
         mock_minio = MagicMock()
         mock_client.return_value = mock_minio
-        
+
         # Matches from 3 different dates, plus one future date (2026-05-30)
         mock_fetch.return_value = [
             {"date": "2026-05-20", "home_team": "A", "score_home": 1, "match_started": True},
             {"date": "2026-05-20", "home_team": "B", "score_home": 1, "match_started": True},
             {"date": "2026-05-21", "home_team": "C", "score_home": 1, "match_started": True},
-            {"date": "2026-05-30", "home_team": "D", "score_home": 1, "match_started": True}, # Future
+            {"date": "2026-05-30", "home_team": "D", "score_home": 1, "match_started": True},  # Future
         ]
 
         total = fetch_and_upload("2026-05-29")
-        
+
         assert total == 3  # Excludes the future match
-        assert mock_minio.put_object.call_count == 2 # 1 for 05-20, 1 for 05-21
+        assert mock_minio.put_object.call_count == 2  # 1 for 05-20, 1 for 05-21
 
     @patch("src.staging.fetch_brasileirao.create_minio_client")
     @patch("src.staging.fetch_brasileirao.ensure_bucket_exists")
@@ -185,21 +181,21 @@ class TestFetchAndUpload:
         mock_first_run.return_value = False
         mock_minio = MagicMock()
         mock_client.return_value = mock_minio
-        
+
         # Matches from 3 different dates
         mock_fetch.return_value = [
-            {"date": "2026-05-28", "home_team": "A", "score_home": 1, "match_started": True}, # Match D-1
-            {"date": "2026-05-28", "home_team": "B", "score_home": 1, "match_started": True}, # Match D-1
-            {"date": "2026-05-27", "home_team": "C", "score_home": 1, "match_started": True}, # Past match
-            {"date": "2026-05-29", "home_team": "D", "score_home": 1, "match_started": True}, # Future match
+            {"date": "2026-05-28", "home_team": "A", "score_home": 1, "match_started": True},  # Match D-1
+            {"date": "2026-05-28", "home_team": "B", "score_home": 1, "match_started": True},  # Match D-1
+            {"date": "2026-05-27", "home_team": "C", "score_home": 1, "match_started": True},  # Past match
+            {"date": "2026-05-29", "home_team": "D", "score_home": 1, "match_started": True},  # Future match
         ]
 
         # Execution date is 2026-05-28
         total = fetch_and_upload("2026-05-28")
-        
+
         assert total == 2
         assert mock_minio.put_object.call_count == 1
-        
+
         # Verify it uploaded to the correct date prefix
         call_args = mock_minio.put_object.call_args.kwargs
         assert call_args["object_name"] == "brasileirao/2026-05-28/matches.json"
