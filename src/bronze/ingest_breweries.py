@@ -12,6 +12,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, StringType, StructField, StructType
 
 from src.utils.data_quality import check_row_count, log_quality_summary
+from src.utils.quality_runner import run_quality_checks
 from src.utils.spark_session import create_spark_session
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,11 @@ def _run_ingest(spark: SparkSession, execution_date: str) -> None:
         # Validate before writing — fail fast if staging produced no data
         check_row_count(df, min_rows=1)
         log_quality_summary(df, "bronze", critical_columns=["id", "name", "brewery_type"])
+
+        # P3.7 — Declarative quality contract for the Bronze layer. Rules
+        # live in quality/checks/bronze_breweries.yml; any FAIL-severity
+        # rule violation raises QualityCheckError and aborts the run.
+        run_quality_checks(df, checks_file="bronze_breweries.yml")
 
         # Write to Iceberg Bronze
         # Idempotency: overwritePartitions() atomically replaces only the partitions

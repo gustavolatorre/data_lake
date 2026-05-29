@@ -8,6 +8,10 @@ x-spark-common: &spark-common
   volumes:
     - ./src:/opt/spark/src
     - ./jobs:/opt/spark/jobs
+    # Declarative DQ rules consumed when the driver runs on the Spark side.
+    # Mirrors the Airflow mount so the same hard-coded path works in either
+    # deploy_mode (client / cluster).
+    - ./quality:/opt/airflow/quality
   env_file:
     - .env
   networks:
@@ -36,6 +40,8 @@ x-airflow-common: &airflow-common
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
     - ./dbt_project:/opt/airflow/dbt_project
+    # Declarative DQ rules consumed by src/utils/quality_runner.py (P3.7).
+    - ./quality:/opt/airflow/quality
   depends_on:
     postgres:
       condition: service_healthy

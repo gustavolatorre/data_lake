@@ -27,6 +27,18 @@ def patched_functions():
         yield mock_f
 
 
+@pytest.fixture(autouse=True)
+def _no_op_quality_runner():
+    """Stub the YAML quality runner — its real implementation reads a file at
+    ``/opt/airflow/quality/checks/bronze_breweries.yml`` which does not exist
+    in CI runners. These tests are about the Bronze write orchestration, not
+    about the rule runner; that one has its own coverage in
+    ``tests/unit/test_quality_runner.py``.
+    """
+    with patch("src.bronze.ingest_breweries.run_quality_checks") as stub:
+        yield stub
+
+
 def _make_mock_spark(table_exists: bool, row_count: int = 5):
     """Build a SparkSession mock wired for ``_run_ingest``.
 

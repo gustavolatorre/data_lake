@@ -111,6 +111,7 @@ Iceberg `format-version=2` everywhere. v3 was attempted (P1.15) but Dremio
 | `Security` CI job | PR | `pip-audit`, Trivy fs (HIGH+), Trivy config (MEDIUM+) — `continue-on-error` while burning down baseline |
 | `_assert_source_not_shrinking` | Silver Spark job | Partial fetch protection |
 | Quarantine split (`id IS NULL`) | Silver Spark job | Diverts bad rows to `breweries_quarantine` instead of aborting |
+| Declarative YAML rules via `run_quality_checks` (P3.7) | Bronze Spark job | Row count, missing-count, unique-count, missing-percent — `fail` rules abort, `warn` rules only log |
 | `dbt build` tests (`unique`, `not_null`, `relationships`, `freshness`) | Gold Airflow task | Cross-layer integrity |
 
 ## 5b. Observability — OpenLineage (P3.6)
