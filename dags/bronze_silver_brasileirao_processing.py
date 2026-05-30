@@ -2,16 +2,18 @@
 
 Triggers when the staging_brasileirao_raw asset is updated. Lifecycle:
 
-    create_branch  ──▶  staging_to_bronze  ──▶  (silver_placeholder)  ──▶  merge_branch
-                                       │                                         │
-                                       └──────────── cleanup_branch ◀────────────┘
+    create_branch  ──▶  staging_to_bronze  ──▶  bronze_to_silver  ──▶  merge_branch
+                                       │                                       │
+                                       └──────────── cleanup_branch ◀──────────┘
                                               (runs only on upstream failure)
 
 * The first task creates ``etl_bronze_silver_brasileirao_<date>`` off ``main``.
 * Bronze and Silver Spark jobs bind to that branch via ``--nessie-ref``;
-  every write stays isolated.
-* ``merge_branch`` only emits the asset after a clean Spark fan-out.
-* ``cleanup_branch`` runs on upstream failure (``trigger_rule="one_failed"``).
+  every write stays isolated on that branch until ``merge_branch`` runs.
+* ``merge_branch`` emits the asset only after the Silver MERGE + DQ contract
+  has passed.
+* ``cleanup_branch`` runs on upstream failure (``trigger_rule="one_failed"``)
+  and drops the orphan branch so ``main`` stays clean.
 
 Emits the iceberg_silver_brasileirao asset.
 """
@@ -21,7 +23,6 @@ from datetime import timedelta
 
 import pendulum
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
-from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk import Asset, dag, task
 from airflow.task.trigger_rule import TriggerRule
 from callbacks import build_failure_callback
@@ -104,9 +105,18 @@ def bronze_silver_brasileirao_pipeline():
         verbose=False,
     )
 
-    # Placeholder for the future Silver processing step
-    bronze_to_silver = EmptyOperator(
-        task_id="bronze_to_silver_placeholder",
+    bronze_to_silver = SparkSubmitOperator(
+        task_id="bronze_to_silver",
+        application="/opt/airflow/src/silver/transform_brasileirao.py",
+        name="brasileirao_silver_transform",
+        conn_id="spark_docker",
+        conf=SPARK_CONF,
+        application_args=[
+            EXECUTION_DATE_TEMPLATE,
+            "--nessie-ref",
+            NESSIE_BRANCH_TEMPLATE,
+        ],
+        verbose=False,
     )
 
     @task(task_id="merge_branch", outlets=[iceberg_silver_brasileirao], retries=1)
