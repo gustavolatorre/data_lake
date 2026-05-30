@@ -127,6 +127,28 @@ class TestSerieACoverage:
     def test_major_teams_mapped(self, team, expected_uf):
         assert HOME_TEAM_TO_STATE.get(team) == expected_uf
 
+    @pytest.mark.parametrize(
+        "stadium,expected_uf",
+        [
+            # Variants reported as UNKNOWN against the GE data on 2026-05-30.
+            # Some are accent-less forms (would also work via accent
+            # normalization, but kept as direct keys for resilience). Others
+            # are genuinely different names that GE returns.
+            ("Arena do Gremio", "RS"),  # accent-less of "Arena do Grêmio"
+            ("Cicero de Souza Marques", "SP"),  # Água Santa home (Diadema)
+            ("Morumbis", "SP"),  # lowercase-B variant of MorumBis
+            ("Barradao", "BA"),  # accent-less of "Barradão"
+            ("Brinco de Ouro", "SP"),  # short name of "Brinco de Ouro da Princesa"
+            ("Caninde", "SP"),  # accent-less of "Canindé"
+        ],
+    )
+    def test_stadium_variants_from_production_data(self, stadium, expected_uf):
+        """Regression test for stadium names observed coming back as UNKNOWN
+        in the 2026 Brasileirão run. Removing any of these would re-introduce
+        the gap.
+        """
+        assert STADIUM_TO_STATE.get(stadium) == expected_uf
+
 
 class TestConstants:
     """Origin / sentinel constants are stable strings — Gold filters on them."""
