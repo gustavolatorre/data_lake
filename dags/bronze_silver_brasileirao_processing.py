@@ -20,8 +20,8 @@ import logging
 from datetime import timedelta
 
 import pendulum
-from airflow.operators.empty import EmptyOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk import Asset, dag, task
 from airflow.task.trigger_rule import TriggerRule
 from callbacks import build_failure_callback
@@ -92,9 +92,9 @@ def bronze_silver_brasileirao_pipeline():
 
     staging_to_bronze = SparkSubmitOperator(
         task_id="staging_to_bronze",
-        application="src/bronze/ingest_brasileirao.py",
+        application="/opt/airflow/src/bronze/ingest_brasileirao.py",
         name="brasileirao_bronze_ingestion",
-        conn_id="spark_default",
+        conn_id="spark_docker",
         conf=SPARK_CONF,
         application_args=[
             EXECUTION_DATE_TEMPLATE,
@@ -115,7 +115,7 @@ def bronze_silver_brasileirao_pipeline():
         from src.utils.nessie_branch import merge_branch as _merge
 
         logger.info("Merging branch '%s' into 'main'", branch_ref)
-        _merge(branch_ref, target_ref="main")
+        _merge(branch_ref, target="main")
 
     merge_task = merge_branch(branch_name)
 

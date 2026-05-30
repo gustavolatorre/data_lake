@@ -37,7 +37,10 @@ BRASILEIRAO_SCHEMA = StructType(
         StructField("match_url", StringType(), True),
         StructField("match_started", BooleanType(), True),
         StructField("source", StringType(), True),
-        StructField("ge_match_id", IntegerType(), True),  # GE ID is typically an integer
+        # GE API returns `id` as a UUID-style string (the campeonato itself is
+        # a UUID — see GE_API_BASE in fetch_brasileirao.py). IntegerType here
+        # silently nulls every value under Spark's PERMISSIVE read mode.
+        StructField("ge_match_id", StringType(), True),
     ]
 )
 
