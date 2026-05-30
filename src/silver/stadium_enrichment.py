@@ -22,6 +22,15 @@ zero Python UDF serialization, everything stays in the JVM.
 Migration path: when the dicts grow past hand-curation (>~200 entries), swap
 the implementation here to ``spark.table('nessie.silver.brasileirao_stadium_lookup')``
 and the rest of the Silver pipeline is unchanged.
+
+Important contract — accent stripping
+─────────────────────────────────────
+The Silver transform runs ``F.translate`` to strip accents from ``home_team``
+and ``stadium`` *before* the enrichment joins. The dict keys here are kept
+with their original accents (so they read naturally and match what GE
+returns), but ``build_lookup_frames`` normalizes them via the SAME translate
+map before materializing the lookup DataFrames. This keeps the join key
+identical on both sides of the equality predicate.
 """
 
 from pyspark.sql import DataFrame, SparkSession
@@ -325,19 +334,45 @@ ORIGIN_UNKNOWN = "UNKNOWN"
 SENTINEL_STATE = "UNKNOWN"
 
 
+# Same accent map as ``transform_brasileirao._ACCENTS`` / ``_PLAIN``.
+# Kept here as a separate constant so this module doesn't import from the
+# transform (avoids a circular import) — divergence would silently break
+# the enrichment join. The pair is also smoke-tested in
+# tests/unit/test_stadium_enrichment.py against the values in
+# transform_brasileirao.
+_ACCENTS = "áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ"
+_PLAIN = "aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC"
+_TRANSLATE_TABLE = str.maketrans(_ACCENTS, _PLAIN)
+
+
+def _strip_accents(s: str) -> str:
+    """Python-side equivalent of ``F.translate(col, _ACCENTS, _PLAIN)``.
+
+    Char-by-char 1:1 mapping — NOT a Unicode NFD decomposition. Must be
+    kept in lock-step with ``transform_brasileirao._ACCENTS`` / ``_PLAIN``
+    so the lookup keys end up byte-identical to the transformed column.
+    """
+    return s.translate(_TRANSLATE_TABLE)
+
+
 def build_lookup_frames(spark: SparkSession) -> tuple[DataFrame, DataFrame]:
     """Materialize the two lookup dicts as Spark DataFrames.
 
     Returned DataFrames are intended for ``F.broadcast()`` joins — tiny,
     static, no shuffle. Column names are prefixed to avoid clashing with
     the Bronze schema when joined.
+
+    Keys are accent-normalized at materialization time so they match what
+    the Silver transform produces (which strips accents from ``home_team``
+    and ``stadium`` before the join). Without this normalization every row
+    would land in the UNKNOWN bucket.
     """
     stadiums = spark.createDataFrame(
-        [(k, v) for k, v in STADIUM_TO_STATE.items()],
+        [(_strip_accents(k), v) for k, v in STADIUM_TO_STATE.items()],
         ["_lookup_stadium", "_lookup_stadium_state"],
     )
     teams = spark.createDataFrame(
-        [(k, v) for k, v in HOME_TEAM_TO_STATE.items()],
+        [(_strip_accents(k), v) for k, v in HOME_TEAM_TO_STATE.items()],
         ["_lookup_home_team", "_lookup_home_team_state"],
     )
     return stadiums, teams
