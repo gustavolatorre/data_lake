@@ -385,6 +385,7 @@ You can access and monitor the active nodes and service consoles using the follo
 | `make init-secrets` | Bootstrap a fresh `airflow.env` from the example, auto-filling Fernet + Webserver + JWT keys (idempotent: refuses to overwrite an existing file) |
 | `make init-precommit` | Install `pre-commit` + `detect-secrets` and register the Git hooks |
 | `make security-scan` | Run `pip-audit --strict` against installed deps (mirrors the CI Security job) |
+| `make validate-secrets` | Check `.env` credential strength (MinIO/Postgres/Dremio/Airflow) before `make up` |
 | `make help` | List all available commands |
 
 ---

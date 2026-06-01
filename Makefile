@@ -1,4 +1,4 @@
-.PHONY: up down restart logs test lint fmt clean help init-secrets init-precommit security-scan
+.PHONY: up down restart logs test lint fmt clean help init-secrets init-precommit security-scan validate-secrets
 
 ## —— Docker ——————————————————————————————————————————
 up: ## Start all services
@@ -56,6 +56,9 @@ init-precommit: ## Install pre-commit + detect-secrets, then register Git hooks
 security-scan: ## Run pip-audit + check for known CVEs in dependencies (mirrors the CI Security job)
 	@uv pip install "pip-audit>=2.7"
 	@uv run pip-audit --strict --skip-editable
+
+validate-secrets: ## Check .env credential strength (MinIO/Postgres/Dremio/Airflow) before `make up`
+	@uv run python scripts/validate_secrets.py
 
 init-secrets: ## Bootstrap airflow.env from .example with fresh Fernet + Webserver + JWT keys (idempotent: refuses to overwrite an existing airflow.env)
 	@if [ -f airflow.env ]; then \

@@ -6,11 +6,13 @@
 # =============================================================================
 
 DREMIO_URL="http://dremio:9047"
-DREMIO_USER="${DREMIO_ADMIN_USER}"
-DREMIO_PASS="${DREMIO_ADMIN_PASSWORD}"
+# Fail fast on missing credentials instead of silently falling back to weak
+# defaults (admin/password). These come from .env via the compose env_file.
+DREMIO_USER="${DREMIO_ADMIN_USER:?DREMIO_ADMIN_USER must be set (see .env)}"
+DREMIO_PASS="${DREMIO_ADMIN_PASSWORD:?DREMIO_ADMIN_PASSWORD must be set (see .env)}"
 NESSIE_ENDPOINT="${NESSIE_URI:-http://nessie:19120/api/v2}"
-MINIO_ACCESS_KEY="${MINIO_ROOT_USER:-admin}"
-MINIO_SECRET_KEY="${MINIO_ROOT_PASSWORD:-password}"
+MINIO_ACCESS_KEY="${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set (see .env)}"
+MINIO_SECRET_KEY="${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set (see .env)}"
 MAX_RETRIES=40
 RETRY_INTERVAL=10
 
