@@ -25,12 +25,23 @@ OUTPUT_PATH = Path("/opt/airflow/simple_auth_passwords.json")
 
 
 def main() -> int:
-    user = os.environ.get("AIRFLOW_USER", "admin")
-    password = os.environ.get("AIRFLOW_PASSWORD", "airflow")
+    user = os.environ.get("AIRFLOW_USER")
+    password = os.environ.get("AIRFLOW_PASSWORD")
+
+    # Fail fast instead of silently falling back to insecure defaults: an unset
+    # credential almost always means a misconfigured .env, and shipping an
+    # "admin" / "airflow" login is worse than refusing to start.
+    if not user or not password:
+        sys.stderr.write(
+            "ERROR: AIRFLOW_USER and AIRFLOW_PASSWORD must both be set "
+            "(copy .env.example to .env and fill them in). Refusing to start "
+            "with insecure defaults.\n"
+        )
+        return 1
 
     if password in ("airflow", "admin", "password", "changeme"):
-        # Loud warning but don't abort — local docker-compose smoke tests rely
-        # on the default. Production deployments use strong passwords from .env.
+        # Weak but explicitly chosen — warn loudly. Strength is enforced
+        # separately by `make validate-secrets` before the stack comes up.
         sys.stderr.write(
             f"WARNING: AIRFLOW_PASSWORD is weak ({password!r}); "
             "use a strong value in .env for non-local environments.\n"

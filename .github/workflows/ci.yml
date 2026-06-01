@@ -11,9 +11,9 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -37,15 +37,15 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -68,15 +68,15 @@ jobs:
     # Heavier than the unit job: pulls in the airflow extras + lets Spark
     # fetch the Iceberg runtime JAR through Ivy on first start.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -90,7 +90,7 @@ jobs:
       - name: Cache Spark Ivy jars
         # First Spark start downloads ``iceberg-spark-runtime-4.0_2.13`` via
         # Ivy. Caching ``~/.ivy2`` shaves ~30s off subsequent CI runs.
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.ivy2
@@ -112,9 +112,9 @@ jobs:
       run:
         working-directory: dbt_project
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -156,9 +156,9 @@ jobs:
     # Flip this to `false` once the team is ready to gate on it.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -183,7 +183,7 @@ jobs:
       - name: Trivy filesystem scan
         # Scans the repo for vulnerable dependencies + known CVEs in
         # Dockerfiles. `severity: HIGH,CRITICAL` keeps signal-to-noise high.
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -195,7 +195,7 @@ jobs:
       - name: Trivy config scan (Dockerfiles + compose)
         # Misconfigurations only — secrets, root containers, missing healthchecks,
         # etc. Less noisy than vuln scans, so we surface MEDIUM+ here.
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .
