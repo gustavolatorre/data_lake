@@ -72,7 +72,34 @@ What we still want (roadmap):
 | OIDC/OAuth login for Airflow (replace SimpleAuthManager) | P3.10 |
 | Bearer auth on Nessie REST API | P0.3 follow-up |
 | Container vulnerability scanning at build time | P3.4 extension |
-| Toggle CI `Security` job from `continue-on-error: true` → `false` once the initial backlog is zero | follow-up |
+| Promote the CI `Security` gate from CRITICAL-only → HIGH → full-job blocking as the backlog clears (CRITICAL gate is already live) | follow-up |
+
+## Historical credential exposure (resolved)
+
+Early in the project's history, `airflow.env` was tracked in git
+(`8506a17`, `d57bc3a`, `afa068b`) before being removed in `3b878df` and added to
+`.gitignore`. The file held Airflow **infrastructure signing keys**
+(`AIRFLOW__CORE__FERNET_KEY`, the webserver/API `SECRET_KEY`, and the
+`JWT_SECRET`) — not third-party or cloud credentials, and no customer data.
+
+**Status: mitigated. History intentionally not rewritten.**
+
+- **Rotated.** Every exposed key was rotated (P0 in `CHANGELOG.md`); the values
+  left in history are dead. (Verified: none of the historical secret values
+  appear in the current `airflow.env`.)
+- **No external surface.** Every service binds to `127.0.0.1` / the internal
+  Docker network, so the keys grant no external access even setting rotation
+  aside.
+- **Recurrence blocked.** `airflow.env` is gitignored and `detect-secrets` +
+  `detect-private-key` run on every commit (`.pre-commit-config.yaml`).
+
+We deliberately did **not** `git filter-repo` the history: the residual risk is
+effectively zero (dead, loopback-only infra keys), while rewriting a public
+repo's history breaks every downstream commit SHA and existing PR reference for
+a purely cosmetic gain — and transparency reads better than a silently-scrubbed
+log. **This calculus flips** the moment a third-party / cloud credential (AWS
+keys, API tokens, off-box DB passwords) lands in a commit: purge with
+`git filter-repo` *and* rotate immediately.
 
 ## Disclosure timeline (target)
 
