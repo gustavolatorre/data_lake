@@ -1,8 +1,12 @@
-"""Generate /opt/airflow/simple_auth_passwords.json with bcrypt-hashed passwords.
+"""Generate /opt/airflow/simple_auth_passwords.json for the SimpleAuthManager.
 
-Airflow 3.x SimpleAuthManager reads usernames/passwords from a JSON file. We
-hash the password with bcrypt before writing so a leaked file does NOT trivially
-disclose the plaintext credential. Idempotent: writes the file with mode 0600.
+Airflow 3.x's SimpleAuthManager reads usernames/passwords from a JSON file and
+authenticates with a **direct plaintext string comparison** — it does NOT
+support hashed passwords (bcrypt or otherwise). Storing a hash here would make
+every login fail with 401, so the password is written in plaintext. Exposure is
+mitigated by (1) keeping the file at a container-internal path that is never
+mounted to the host and (2) mode 0600. Replacing SimpleAuthManager with a real
+auth backend is tracked as roadmap item P3.10. Idempotent.
 
 Reads ``AIRFLOW_USER`` and ``AIRFLOW_PASSWORD`` from the environment. Falls back
 to ``admin`` / ``airflow`` only if they're unset — but that path is meant for
@@ -17,14 +21,7 @@ import stat
 import sys
 from pathlib import Path
 
-import bcrypt
-
 OUTPUT_PATH = Path("/opt/airflow/simple_auth_passwords.json")
-
-
-def _hash(password: str) -> str:
-    """Return a bcrypt hash (12 rounds) of ``password`` as an ASCII string."""
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def main() -> int:

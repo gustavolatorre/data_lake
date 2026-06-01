@@ -52,8 +52,9 @@ ARG NESSIE_VERSION=0.107.5
 ARG HADOOP_AWS_VERSION=3.4.1
 ARG AWS_SDK_V2_VERSION=2.24.6
 # OpenLineage Spark listener — emits lineage events for every Spark action.
-# When OPENLINEAGE_URL is empty (default) the listener is loaded but only
-# logs; it does not phone home anywhere.
+# The JAR is baked into the image, but the listener is opt-in: create_spark_session
+# registers spark.extraListeners only when OPENLINEAGE_URL is set. Empty (default)
+# = not registered at all, so nothing phones home.
 ARG OPENLINEAGE_VERSION=1.24.2
 
 # Each JAR is verified against its .sha512 fetched from the same Maven Central

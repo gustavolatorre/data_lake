@@ -79,13 +79,17 @@ containers (`minio-setup`, `dremio-setup`).
 
 ## 3. Orchestration
 
-Three reactive (asset-aware) DAGs + one weekly maintenance DAG:
+Two Medallion pipelines — breweries (full Bronze→Gold) and brasileirão
+(Bronze→Silver, see §8) — plus a shared weekly maintenance DAG. All
+inter-layer scheduling is asset-aware (reactive):
 
 | DAG | Schedule | Outlets | Inlets |
 |-----|----------|---------|--------|
 | `staging_breweries_ingestion` | `@daily` | `s3://staging/breweries` | — |
 | `bronze_silver_breweries_processing` | asset `s3://staging/breweries` | `iceberg://nessie/silver/breweries` (emitted by `merge_branch`) | (asset) |
 | `gold_dbt_breweries_processing` | asset `iceberg://nessie/silver/breweries` | `iceberg://nessie/gold/breweries` | (asset) |
+| `staging_brasileirao_ingestion` | `@daily` | `s3://staging/brasileirao` | — |
+| `bronze_silver_brasileirao_processing` | asset `s3://staging/brasileirao` | `iceberg://nessie/silver/brasileirao` (emitted by `merge_branch`) | (asset) |
 | `iceberg_maintenance` | `@weekly` | — | — |
 
 Failure callbacks: shared factory in `dags/callbacks.py`
@@ -133,7 +137,7 @@ Iceberg `format-version=2` everywhere. v3 was attempted (P1.15) but Dremio
 |------|-------|-----------------|
 | Pre-commit | local | Format, lint, large files, secrets |
 | `Lint` CI job | PR | Ruff (`check` + `format --check`), mypy |
-| `Test` CI job | PR | 84+ unit tests, coverage gate `fail_under=85` |
+| `Test` CI job | PR | 200+ unit tests, coverage gate `fail_under=85` |
 | `dbt Validate` CI job | PR | `dbt deps + parse` via `dbt-duckdb` (connectionless) |
 | `Security` CI job | PR | `pip-audit`, Trivy fs (HIGH+), Trivy config (MEDIUM+) — `continue-on-error` while burning down baseline |
 | `_assert_source_not_shrinking` | Silver Spark job | Partial fetch protection |
@@ -143,24 +147,29 @@ Iceberg `format-version=2` everywhere. v3 was attempted (P1.15) but Dremio
 
 ## 5b. Observability — OpenLineage (P3.6)
 
-Two emitters are wired by default; both are inert until a collector URL is
-configured, so the bundled images "just work" with no external dependency.
+Two emitters, with **different empty-URL behaviour**. Both keep the bundled
+images working with no external dependency:
 
-| Emitter | Source | Triggered by |
-|---------|--------|--------------|
-| Airflow provider | `apache-airflow-providers-openlineage` (image-baked) | every task instance |
-| Spark listener | `openlineage-spark_2.13` JAR + `spark.extraListeners` in `create_spark_session` | every Spark action |
+| Emitter | Source | Triggered by | When `OPENLINEAGE_URL` is empty (default) |
+|---------|--------|--------------|-------------------------------------------|
+| Airflow provider | `apache-airflow-providers-openlineage` (image-baked) | every task instance | Provider stays loaded, log-only — nothing transmitted |
+| Spark listener | `openlineage-spark_2.13` JAR + `spark.extraListeners` in `create_spark_session` | every Spark action | **Not registered at all** — `_apply_openlineage_config` returns the builder untouched (silent no-op) |
 
 **Configuration:**
 
 | Env var | Default | Effect |
 |---------|---------|--------|
-| `OPENLINEAGE_URL` | empty | Empty = listener loads but only logs; non-empty (e.g. `http://marquez:5000`) flips to HTTP transmit |
+| `OPENLINEAGE_URL` | empty | Empty = Airflow provider logs only / Spark listener not registered. Non-empty (e.g. `http://marquez:5000`) registers the Spark listener and flips both to HTTP transmit |
 | `OPENLINEAGE_NAMESPACE` | `data_lake` | Groups events from this project across pipelines / Spark apps |
 | `AIRFLOW__OPENLINEAGE__NAMESPACE` | `data_lake` | Same, but for the Airflow provider scope |
 
-**Why empty-by-default:** keeps the smoke test reproducible (no external
-service to fail), and surfaces lineage in logs as a learning aid. Point at
+**Why the Spark listener is not registered when empty:** the Spark driver runs
+`spark-submit` in client mode from the Airflow container, where the listener
+JAR is *not* on the classpath. Registering `spark.extraListeners`
+unconditionally would crash the driver with `ClassNotFoundException`. So
+`OPENLINEAGE_URL` doubles as the opt-in switch — when you set it, you also take
+responsibility for making the JAR reachable on the driver (e.g. via `--jars`).
+This keeps the smoke test reproducible (no external service to fail). Point at
 Marquez / Datadog / any OpenLineage-compatible collector when you're ready.
 
 ## 6. Credentials & secrets
@@ -188,7 +197,58 @@ Bootstrap helper: `make init-secrets` copies `airflow.env.example` to
 | Silver MERGE refuses with `SourceShrinkError` | Today's API fetch was partial. Investigate `staging_breweries_ingestion` task logs before clearing |
 | Rows missing from Silver but present in Bronze | Check `nessie.silver.breweries_quarantine WHERE quarantine_date = '<date>'` — they probably failed `id IS NULL` |
 
-## 8. Roadmap pointer
+## 8. Second domain — Brasileirão Série A
+
+A second, independent Medallion pipeline runs on the same stack, ingesting
+Brazilian football (Brasileirão Série A) match data. It reuses every shared
+util (`create_spark_session`, `nessie_branch`, `quality_runner`,
+`minio_client`, `logging_config`) but **stops at Silver** — there is no Gold /
+dbt model for it yet (breweries remains the only Gold domain).
+
+### Layer contract
+
+| Layer | Path | Engine | Idempotency |
+|-------|------|--------|-------------|
+| Staging | `s3://staging/brasileirao/{match_date}/matches.json` | Python + MinIO SDK | Overwrite per match-date |
+| Bronze | `nessie.bronze.brasileirao` (Iceberg v2) | Spark | `overwritePartitions()` on `days(ingestion_ts)`; multi-date scan filtered by a Bronze high-watermark (`MAX(ingestion_date)`, `>=` so the HW date is re-processed) |
+| Silver | `nessie.silver.brasileirao` (Iceberg v2) | Spark `MERGE INTO` | Upsert keyed on `ge_match_id`; partitioned by `months(match_date)` |
+
+### Key differences vs the breweries pipeline
+
+- **Source**: the GE (Globo Esporte) internal JSON API. `fetch_brasileirao`
+  scans all 38 rounds, keeps only finished matches, and partitions staging
+  files by the **match date** (not by Airflow's `execution_date`). First run
+  backfills every historical date; later runs upload only `execution_date`.
+- **Bronze is path-driven, not execution-date-driven.** A single staging run
+  can drop many dates at once, so Bronze scans
+  `s3a://staging/brasileirao/*/matches.json`, derives `ingestion_date` from
+  the file path, and filters with a high-watermark. `ge_match_id` is a
+  UUID-style **string** (not an int).
+- **Silver is a plain UPSERT** — no `WHEN NOT MATCHED BY SOURCE` (a played
+  match never disappears) and no shrink guard (staging is incremental, not a
+  full snapshot). The Bronze→Silver delta is driven by a Silver-side
+  high-watermark on `MAX(updated_at)`.
+- **Enrichment**: derives `stadium_state` (UF) + `stadium_state_origin` via
+  broadcast-joined lookup dicts in `src/silver/stadium_enrichment.py`, with a
+  cascade `stadium → home_team → __UNKNOWN__`. Also derives `total_goals` and
+  `match_outcome` (HOME_WIN / AWAY_WIN / DRAW).
+- **Quarantine**: rows with NULL `ge_match_id` go to
+  `nessie.silver.brasileirao_quarantine` (append-only, partitioned by
+  `quarantine_date`).
+- **DQ contracts**: `quality/checks/bronze_brasileirao.yml` is intentionally
+  minimal (`row_count >= 1`); `silver_brasileirao.yml` enforces 7 fail-level
+  invariants (no-null + unique `ge_match_id`, non-null `match_date`,
+  `stadium_state`, `is_active`, …) plus 3 warn-level `missing_percent` signals.
+
+### Orchestration
+
+Same Nessie branch-isolation pattern as breweries:
+`create_branch` → `staging_to_bronze` → `bronze_to_silver` → `merge_branch`,
+with `cleanup_branch` (`trigger_rule=one_failed`, wired off `staging_to_bronze`
+and `bronze_to_silver`) dropping the orphan branch on failure so `main` stays
+clean. Branch name: `etl_bronze_silver_brasileirao_<date>`.
+
+## 9. Roadmap pointer
 
 The living roadmap is `ROADMAP.md` (gitignored — local working doc).
 Architecture-affecting items: P3.1 (Nessie branching), P3.5 (e2e tests),

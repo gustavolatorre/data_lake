@@ -6,6 +6,12 @@
 
 This project implements a **production-ready, fully reactive, and completely idempotent Data Lakehouse** engineered under the **Medallion Architecture** pattern. The pipeline ingests real-world brewery data from the [OpenBreweryDB API](https://www.openbrewerydb.org/), orchestrates event-driven processing using **Apache Airflow 3.2.1**, cleans and unifies datasets via **Apache Spark 4.0.0** (natively compiled with Scala 2.13), manages transactional table states using **Apache Iceberg 1.11.0**, tracks historical lineage and catalogs via **Project Nessie 0.107.5** (providing Git-like semantics), and builds the analytics-ready Gold dimensional model inside **Dremio** using **dbt Core**.
 
+> **Two pipelines, one stack.** This lakehouse runs two independent Medallion
+> pipelines: **breweries** (OpenBreweryDB) all the way to the Gold dimensional
+> model, and **Brasileirão Série A** (Globo Esporte match data) through
+> Bronze → Silver. The deep-dive below describes the breweries flow; the
+> Brasileirão pipeline has its own section ("Second Pipeline") further down.
+
 ---
 
 ## 🏗️ Data Flow & Reactive (Asset-Aware) Architecture
@@ -150,7 +156,7 @@ The `iceberg_maintenance` DAG (`@weekly`) runs three Iceberg procedures against 
 The OpenLineage Spark listener JAR is baked into the Spark image. It is **not registered by default** — the SparkSession factory only attaches `spark.extraListeners` when `OPENLINEAGE_URL` is non-empty. Set the env var pointing at a Marquez or compatible backend to start emitting lineage events; leave it unset and the listener is a no-op (no phone-home).
 
 ### 6. Bronze Table Schema (Reference)
-The Bronze table preserves every field returned by the OpenBreweryDB API plus two ingestion metadata columns:
+The Bronze table preserves every field returned by the OpenBreweryDB API plus three ingestion metadata columns:
 
 | Column | Type | Source |
 | :--- | :--- | :--- |
@@ -161,8 +167,9 @@ The Bronze table preserves every field returned by the OpenBreweryDB API plus tw
 | `city`, `state_province`, `state`, `country` | STRING | API |
 | `postal_code`, `street`, `phone`, `website_url` | STRING | API |
 | `longitude`, `latitude` | DOUBLE | API |
-| `ingestion_date` | STRING (YYYY-MM-DD) | injected — partition key |
-| `ingested_at` | TIMESTAMP (UTC) | injected — `F.current_timestamp()` |
+| `ingestion_date` | STRING (YYYY-MM-DD) | injected — stable join key |
+| `ingested_at` | TIMESTAMP (UTC) | injected — `F.current_timestamp()` (wall-clock) |
+| `ingestion_ts` | TIMESTAMP | injected — derived from `execution_date`; drives the hidden `days(ingestion_ts)` partition spec |
 
 The Silver layer trims this down to the analytical subset (`id`, `name`, `brewery_type`, `address_1`, `city`, `state`, `country`, `is_active`, `updated_at`, `ingestion_date`) and is **partitioned by `state`**, which speeds up Gold queries that filter or aggregate by geography.
 
@@ -174,9 +181,59 @@ Two pieces of plumbing make the stack work out of the box without manual UI clic
 
 ---
 
+## ⚽ Second Pipeline: Brasileirão Série A
+
+Alongside breweries, the same stack runs a second, fully independent Medallion
+pipeline that ingests **Brasileirão Série A** football matches. It reuses every
+shared building block (Spark session factory, Nessie branching, MinIO client,
+declarative quality runner) and goes from **Staging → Bronze → Silver**. It does
+**not** have a Gold/dbt layer yet — breweries is still the only domain modeled
+into Dremio.
+
+### Data source & ingestion
+`src/staging/fetch_brasileirao.py` reads the **Globo Esporte (GE) internal JSON
+API** — the same endpoint the browser calls. It scans all 38 rounds, keeps only
+matches that already finished, and writes one file per match date:
+`s3://staging/brasileirao/{match_date}/matches.json`. The first run backfills
+every historical date; subsequent runs upload only the day being processed.
+
+### Bronze (path-driven, multi-date)
+Unlike breweries (which reads a single `{execution_date}` folder), the
+Brasileirão Bronze (`src/bronze/ingest_brasileirao.py`) scans
+`s3a://staging/brasileirao/*/matches.json`, derives `ingestion_date` from the
+**file path**, and processes only dates `>=` the Bronze high-watermark
+(`MAX(ingestion_date)`, read from Iceberg manifest metadata — no data scan).
+Writes are idempotent via `overwritePartitions()` over the hidden
+`days(ingestion_ts)` spec. `ge_match_id` is stored as a **STRING** (the GE id is
+a UUID).
+
+### Silver (UPSERT + stadium enrichment)
+`src/silver/transform_brasileirao.py` MERGEs on `ge_match_id`. Because a played
+match never disappears from the source, the Silver MERGE is a **plain upsert** —
+there is **no** `WHEN NOT MATCHED BY SOURCE` soft-delete and **no** 20% shrink
+guard (both of which the breweries Silver uses). It derives analytical columns
+(`total_goals`, `match_outcome`) and enriches each match with its stadium's state
+(UF) through broadcast-joined lookup tables in
+`src/silver/stadium_enrichment.py`, using a cascade
+`stadium → home_team → __UNKNOWN__`. The table is partitioned by
+`months(match_date)`. NULL-`ge_match_id` rows are diverted to
+`nessie.silver.brasileirao_quarantine`.
+
+### Quality & orchestration
+Declarative DQ contracts live in `quality/checks/bronze_brasileirao.yml`
+(minimal: `row_count >= 1`) and `quality/checks/silver_brasileirao.yml` (7
+fail-level invariants + 3 warn-level signals). Orchestration mirrors breweries:
+the `staging_brasileirao_ingestion` DAG (`@daily`) emits the
+`s3://staging/brasileirao` asset, which reactively triggers
+`bronze_silver_brasileirao_processing` — a Nessie branch-isolated
+`create_branch → bronze → silver → merge_branch` flow with `cleanup_branch` on
+failure.
+
+---
+
 ## 🔒 Git-Like Version Control for Data (Project Nessie)
 
-**Project Nessie** acts as our transactional catalog server, hosting metadata at `http://localhost:19120`.
+**Project Nessie** acts as our transactional catalog server, reachable inside the Docker network at `http://nessie:19120` (it is **not** bound to the host by default — see the security note in the Port Mapping section).
 
 ```
          (main) ─── Daily production data flow (Stable, verified states)
@@ -298,10 +355,15 @@ You can access and monitor the active nodes and service consoles using the follo
 | Service | Local URL | Default Credentials |
 | :--- | :--- | :--- |
 | **Airflow 3 UI** | [http://localhost:8080](http://localhost:8080) | Configured via `.env` (`AIRFLOW_USER` / `AIRFLOW_PASSWORD`) |
-| **MinIO Console** | [http://localhost:9001](http://localhost:9001) | `admin` / `password` |
-| **Nessie Admin UI** | [http://localhost:19120](http://localhost:19120) | Public Access (Read/Write) |
-| **Dremio Console** | [http://localhost:9047](http://localhost:9047) | `dremio_admin` / `dremio123` |
+| **MinIO Console** | [http://localhost:9001](http://localhost:9001) | Configured via `.env` (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
+| **Nessie Catalog API** | `http://nessie:19120` (Docker network only — **not bound to host**) | Public Read/Write inside the network |
+| **Dremio Console** | [http://localhost:9047](http://localhost:9047) | Configured via `.env` (`DREMIO_ADMIN_USER` / `DREMIO_ADMIN_PASSWORD`) |
 | **Spark Master UI** | [http://localhost:9090](http://localhost:9090) | Master status dashboard |
+
+> **Credentials are never hard-coded.** All service passwords come from `.env`
+> (see `.env.example`) and `src/config/settings.py` rejects weak/short values
+> for `MINIO_ROOT_PASSWORD`. To reach the Nessie UI/API from the host, either
+> `docker compose exec nessie curl ...` or temporarily add `ports: ["19120:19120"]`.
 
 ### 5. Available Makefile Commands
 
@@ -346,23 +408,25 @@ make lint
 
 ```
 data_lake/
-├── dags/                          # Airflow DAG definitions (3 reactive + 1 cron)
-│   ├── staging_breweries_ingestion.py       # Layer 1: API ingestion (daily schedule)
-│   ├── bronze_silver_breweries_processing.py # Layer 2: Spark Bronze + Silver, branch-isolated (asset-triggered)
-│   ├── gold_dbt_breweries_processing.py     # Layer 3: dbt Gold modeling (asset-triggered)
+├── dags/                          # Airflow DAGs — 2 pipelines (breweries + brasileirao) + weekly maintenance
+│   ├── staging_breweries_ingestion.py        # Breweries L1: API ingestion (daily schedule)
+│   ├── bronze_silver_breweries_processing.py # Breweries L2: Spark Bronze + Silver, branch-isolated (asset-triggered)
+│   ├── gold_dbt_breweries_processing.py      # Breweries L3: dbt Gold modeling (asset-triggered)
+│   ├── staging_brasileirao_ingestion.py      # Brasileirao L1: GE/Globo API ingestion (daily schedule)
+│   ├── bronze_silver_brasileirao_processing.py # Brasileirao L2: Spark Bronze + Silver + stadium enrichment (asset-triggered)
 │   ├── iceberg_maintenance.py     # Weekly: rewrite_data_files + expire_snapshots + remove_orphan_files
 │   └── callbacks.py               # Shared on_failure_callback factory
-├── src/                           # Core Python business logic
-│   ├── staging/                   # API fetch & S3 streaming
+├── src/                           # Core Python business logic (breweries + brasileirao)
+│   ├── staging/                   # API fetch & S3 streaming (fetch_breweries, fetch_brasileirao)
 │   ├── bronze/                    # Iceberg ingestion (overwritePartitions for idempotency)
-│   ├── silver/                    # MERGE INTO + soft delete transforms + quarantine sink
+│   ├── silver/                    # MERGE INTO + soft delete + quarantine; stadium_enrichment (brasileirao)
 │   ├── maintenance/               # Iceberg compaction / snapshot expiration entrypoint
 │   ├── config/                    # Pydantic-settings application config
 │   └── utils/                     # SparkSession factory, MinIO client, logging,
 │                                  #   Nessie branch helper, declarative quality runner
 ├── quality/
-│   └── checks/                    # YAML quality contracts (bronze_breweries.yml,
-│                                  #   silver_breweries.yml) — loaded by quality_runner
+│   └── checks/                    # YAML quality contracts ({bronze,silver}_breweries.yml +
+│                                  #   {bronze,silver}_brasileirao.yml) — loaded by quality_runner
 ├── dbt_project/                   # dbt Core project (Gold layer on Dremio)
 ├── docker/                        # Dockerfiles & provisioning scripts
 │   ├── Dockerfile.spark           # Spark 4.0.0 + Iceberg + AWS SDK v2 + OpenLineage listener (JARs SHA-512 verified)
