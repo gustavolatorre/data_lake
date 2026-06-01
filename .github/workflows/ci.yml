@@ -150,11 +150,11 @@ jobs:
   security:
     name: Security
     runs-on: ubuntu-latest
-    # Don't block the merge on advisories alone — the job still runs and
-    # uploads results so we can act on them, but a single high-sev finding
-    # in a transitive dep does not stop unrelated work from shipping.
-    # Flip this to `false` once the team is ready to gate on it.
-    continue-on-error: true
+    # Graduated gating (see SECURITY.md): the job blocks ONLY on CRITICAL +
+    # fixable vulnerabilities (the final Trivy step). pip-audit and the HIGH /
+    # config scans stay informational (`continue-on-error: true`) so the large
+    # existing backlog of transitive / unfixable findings doesn't block
+    # unrelated work. Promote HIGH to blocking once that backlog is clean.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -170,19 +170,23 @@ jobs:
           uv pip install -e ".[dev]"
           uv pip install "pip-audit>=2.7"
 
-      - name: pip-audit (Python deps)
+      - name: pip-audit (Python deps) — informational
+        continue-on-error: true
         # Freeze just the non-editable installed packages into a requirements
         # file, then audit that. Avoids the "data-lake: distribution marked
         # as editable" error that pip-audit raises when the local project is
         # installed with `-e .`.
-        # `--strict` makes the step fail on any vulnerability.
+        # `--strict` flags any vulnerability; kept informational because it has
+        # no severity filter and would otherwise block on unfixable transitives.
         run: |
           uv pip freeze --exclude-editable > /tmp/audit-requirements.txt
           uv run pip-audit --strict --requirement /tmp/audit-requirements.txt
 
-      - name: Trivy filesystem scan
-        # Scans the repo for vulnerable dependencies + known CVEs in
-        # Dockerfiles. `severity: HIGH,CRITICAL` keeps signal-to-noise high.
+      - name: Trivy filesystem scan (HIGH+) — informational
+        continue-on-error: true
+        # Full HIGH+CRITICAL view for visibility. Informational for now; the
+        # blocking gate below is CRITICAL-only. Promote by removing
+        # continue-on-error once the HIGH backlog is clean.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -192,7 +196,8 @@ jobs:
           exit-code: 1
           format: table
 
-      - name: Trivy config scan (Dockerfiles + compose)
+      - name: Trivy config scan (Dockerfiles + compose) — informational
+        continue-on-error: true
         # Misconfigurations only — secrets, root containers, missing healthchecks,
         # etc. Less noisy than vuln scans, so we surface MEDIUM+ here.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -200,5 +205,18 @@ jobs:
           scan-type: config
           scan-ref: .
           severity: MEDIUM,HIGH,CRITICAL
+          exit-code: 1
+          format: table
+
+      - name: Trivy CRITICAL gate (blocking)
+        # The one step that fails the build: CRITICAL severity, fixable only.
+        # High signal, low noise — the floor we refuse to ship below. Raise to
+        # HIGH (and drop the informational duplicate above) as the backlog clears.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          ignore-unfixed: true
           exit-code: 1
           format: table
