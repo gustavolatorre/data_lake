@@ -4,9 +4,11 @@ Provides a single factory function to create a fully configured SparkSession
 that integrates with Apache Iceberg tables, Nessie REST catalog, and MinIO
 (via S3A filesystem). Eliminates duplicated Spark configuration across scripts.
 
-Also wires the OpenLineage Spark listener (P3.6). The listener is always
-loaded (JAR bundled in the image) but only transmits when
-``OPENLINEAGE_URL`` is set — otherwise it just logs to stderr.
+Also wires the OpenLineage Spark listener (P3.6). The listener is **opt-in**:
+``spark.extraListeners`` is registered only when ``OPENLINEAGE_URL`` is set.
+When it is empty (the default) the listener is not registered at all — a silent
+no-op — so the driver never risks a ``ClassNotFoundException`` when the JAR is
+absent from its classpath.
 """
 
 import logging

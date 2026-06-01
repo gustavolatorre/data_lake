@@ -8,9 +8,10 @@ this file is the public, summarized view.
 ## [Unreleased]
 
 ### Added
+- **Second pipeline — Brasileirão Série A**: a parallel Medallion pipeline (Staging → Bronze → Silver) ingesting Brasileirão match data from the Globo Esporte (GE) internal JSON API. Adds two DAGs (`staging_brasileirao_ingestion`, `bronze_silver_brasileirao_processing`), Spark Bronze/Silver modules under `src/{staging,bronze,silver}/*_brasileirao.py`, stadium→UF enrichment (`src/silver/stadium_enrichment.py`), YAML DQ contracts (`quality/checks/{bronze,silver}_brasileirao.yml`), and a `nessie.silver.brasileirao_quarantine` sink. The Silver MERGE is a plain upsert keyed on `ge_match_id` (no soft-delete / no shrink guard — historical matches never disappear), partitioned by `months(match_date)`. Stops at Silver — no Gold/dbt models yet (breweries remains the only Gold domain).
 - **CI hardening (Wave E)**: `WORKDIR` refactor in `Dockerfile.spark` to satisfy Trivy DS-0013; `ARCHITECTURE.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`.
 - **Quarantine sink** (P3.8): rows with `id IS NULL` go to `nessie.silver.breweries_quarantine` (append-only, partitioned by `quarantine_date`) instead of aborting the run. Added to `iceberg_maintenance` weekly job.
-- **OpenLineage** (P3.6): Airflow provider + Spark listener registered by default. Empty `OPENLINEAGE_URL` = log-only mode (no external dependency). Set `OPENLINEAGE_URL=http://marquez:5000` to transmit.
+- **OpenLineage** (P3.6): Airflow provider (image-baked) + Spark listener (opt-in). With an empty `OPENLINEAGE_URL` (the default) the Airflow provider only logs events and the Spark listener is **not registered at all** — no external dependency, nothing phones home. Set `OPENLINEAGE_URL=http://marquez:5000` to register the Spark listener and transmit.
 - **Declarative quality runner** (P3.7): YAML rule files under `quality/checks/` consumed by `src/utils/quality_runner.py`. Bronze gets `row_count`, `missing_count(id)`, `unique_count(id)`, plus warn-level missing-percent checks on `name` / `brewery_type`. `fail` severity aborts the run; `warn` severity only logs.
 
 ### Changed
